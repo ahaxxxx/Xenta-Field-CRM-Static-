@@ -28,6 +28,15 @@ function safeText(s) {
   return (s || "").toString().trim();
 }
 
+function xmlEscape(value) {
+  return safeText(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 function saveDB() {
   localStorage.setItem(DB_KEY, JSON.stringify(distributors));
 }
@@ -165,6 +174,18 @@ const el = {
   totalCount: document.querySelector("#totalCount"),
 
   btnExport: document.querySelector("#btnExport"),
+  btnExportWeekly: document.querySelector("#btnExportWeekly"),
+  weeklyExportPanel: document.querySelector("#weeklyExportPanel"),
+  weekLabelInput: document.querySelector("#weekLabelInput"),
+  progressSourceSelect: document.querySelector("#progressSourceSelect"),
+  manualProgressWrap: document.querySelector("#manualProgressWrap"),
+  manualProgressInput: document.querySelector("#manualProgressInput"),
+  existingWeeklyFile: document.querySelector("#existingWeeklyFile"),
+  btnGenerateWeeklySummary: document.querySelector("#btnGenerateWeeklySummary"),
+  weeklySummaryText: document.querySelector("#weeklySummaryText"),
+  btnCopyWeeklySummary: document.querySelector("#btnCopyWeeklySummary"),
+  btnRunWeeklyExport: document.querySelector("#btnRunWeeklyExport"),
+  btnCloseWeeklyExport: document.querySelector("#btnCloseWeeklyExport"),
   btnImport: document.querySelector("#btnImport"),
   importFile: document.querySelector("#importFile"),
   btnClearAll: document.querySelector("#btnClearAll"),
@@ -199,8 +220,8 @@ function getFormData() {
 
 function resetForm() {
   currentEditId = null;
-  el.form.reset();
-  el.btnSave.textContent = "Save Distributor";
+  if (el.form) el.form.reset();
+  if (el.btnSave) el.btnSave.textContent = "Save Distributor";
 }
 
 function validateData(d) {
@@ -378,16 +399,333 @@ function render() {
 // ---------------------------
 // Import / Export
 // ---------------------------
-function exportJSON() {
-  const blob = new Blob([JSON.stringify(distributors, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
+async function getExportClients() {
+  if (window.dataAdapter && typeof window.dataAdapter.getAllClients === "function") {
+    try {
+      const clients = await window.dataAdapter.getAllClients();
+      if (Array.isArray(clients)) return clients;
+    } catch (err) {
+      console.warn("[app] Failed to load clients from dataAdapter; using in-memory records.", err);
+    }
+  }
+  return distributors;
+}
 
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `xenta_distributors_${new Date().toISOString().slice(0,10)}.json`;
-  a.click();
+function getProgressUpdatesByClient(clients, options = {}) {
+  const source = safeText(options.progressSource || "latest").toLowerCase();
+  const manualMap = parseManualMapping(options.manualMappingText || "");
 
-  URL.revokeObjectURL(url);
+  const pickField = (d, keys) => {
+    for (const key of keys) {
+      const value = safeText(d[key]);
+      if (value) return value;
+    }
+    return "";
+  };
+
+  const updates = new Map();
+  clients.forEach((d) => {
+    const id = safeText(d.id || d.clientId);
+    if (!id) return;
+
+    let progressText = "";
+    if (source === "weekly") {
+      progressText = pickField(d, [
+        "weeklyNotes",
+        "weekly_notes",
+        "weeklyProgress",
+        "weekly_progress",
+        "weekNotes",
+        "notesWeekly",
+        "weeklyUpdate",
+        "weekly_update",
+      ]);
+    } else if (source === "manual") {
+      progressText = safeText(manualMap.get(id));
+    } else {
+      progressText = pickField(d, [
+        "latestProgress",
+        "latest_progress",
+        "progress",
+        "currentProgress",
+        "status",
+        "stage",
+      ]);
+    }
+
+    if (safeText(progressText)) {
+      updates.set(id, safeText(progressText));
+    }
+  });
+
+  return updates;
+}
+
+function getDefaultWeekLabel() {
+  return `Week ${new Date().toISOString().slice(0, 10)}`;
+}
+
+function parseManualMapping(raw) {
+  const map = new Map();
+  safeText(raw)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const parts = line.split("\t");
+      if (parts.length < 2) return;
+      const id = safeText(parts[0]);
+      const update = safeText(parts.slice(1).join("\t"));
+      if (!id || !update) return;
+      map.set(id, update);
+    });
+  return map;
+}
+
+function sanitizeFilenameToken(value) {
+  const cleaned = safeText(value).replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_");
+  return cleaned || "Week";
+}
+
+function toggleWeeklyPanel(visible) {
+  if (!el.weeklyExportPanel) return;
+  el.weeklyExportPanel.classList.toggle("hidden", !visible);
+}
+
+function syncManualMappingVisibility() {
+  if (!el.progressSourceSelect || !el.manualProgressWrap) return;
+  const showManual = el.progressSourceSelect.value === "manual";
+  el.manualProgressWrap.classList.toggle("hidden", !showManual);
+}
+
+function parseWeekDate(label) {
+  const m = safeText(label).match(/^Week\s+(\d{4}-\d{2}-\d{2})$/i);
+  if (!m) return null;
+  const d = new Date(`${m[1]}T00:00:00Z`);
+  if (!Number.isFinite(d.getTime())) return null;
+  return d;
+}
+
+function getClientId(client) {
+  return safeText(client.id || client.clientId);
+}
+
+function getClientName(client) {
+  return safeText(client.contactName || client.name || client.clientName || client.company || "(Unknown)");
+}
+
+function getClientCountry(client) {
+  return safeText(client.country || "-");
+}
+
+function getClientStage(client) {
+  return safeText(client.stage || client.status);
+}
+
+function getClientPriority(client) {
+  return safeText(client.priority || client.level);
+}
+
+async function readUploadedClientsHistory(file) {
+  if (!file) return null;
+  if (!window.XLSX) {
+    console.warn("[app] SheetJS not found; history analysis skipped.");
+    return null;
+  }
+
+  try {
+    const data = await file.arrayBuffer();
+    const wb = window.XLSX.read(data, { type: "array" });
+    const ws = wb.Sheets["Clients"];
+    if (!ws) return null;
+
+    const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    if (!rows.length) return null;
+
+    const headers = rows[0].map((h) => safeText(h));
+    const idIdx = headers.indexOf("Client ID");
+    if (idIdx === -1) return null;
+
+    const weeklyColumns = headers.filter((h) => h.startsWith("Week "));
+    const rowsById = new Map();
+
+    rows.slice(1).forEach((r) => {
+      const id = safeText(r[idIdx]);
+      if (!id) return;
+      const rowObj = {};
+      headers.forEach((h, i) => {
+        rowObj[h] = safeText(r[i]);
+      });
+      rowsById.set(id, rowObj);
+    });
+
+    return { weeklyColumns, rowsById };
+  } catch (err) {
+    console.warn("[app] Failed reading uploaded history workbook.", err);
+    return null;
+  }
+}
+
+function buildWeeklySummaryText(options) {
+  const weekLabel = safeText(options.weekLabel || getDefaultWeekLabel());
+  const clients = Array.isArray(options.clients) ? options.clients : [];
+  const updatesById = options.updatesById instanceof Map ? options.updatesById : new Map();
+  const history = options.history || null;
+
+  const crmById = new Map();
+  clients.forEach((c) => {
+    const id = getClientId(c);
+    if (!id) return;
+    crmById.set(id, c);
+  });
+
+  const updatedLines = [];
+  Array.from(updatesById.entries()).forEach(([id, update]) => {
+    const c = crmById.get(id) || {};
+    updatedLines.push(`- ${getClientName(c)} (${getClientCountry(c)}): ${safeText(update)}`);
+  });
+  updatedLines.sort((a, b) => a.localeCompare(b));
+
+  const stuckLines = [];
+  if (history && history.weeklyColumns && history.weeklyColumns.length >= 2) {
+    const weekCols = [...history.weeklyColumns];
+    if (!weekCols.includes(weekLabel)) weekCols.push(weekLabel);
+    weekCols.sort((a, b) => {
+      const da = parseWeekDate(a);
+      const db = parseWeekDate(b);
+      if (!da || !db) return a.localeCompare(b);
+      return da - db;
+    });
+
+    const lastTwo = weekCols.slice(-2);
+    const allIds = new Set([
+      ...Array.from(history.rowsById.keys()),
+      ...Array.from(crmById.keys()),
+    ]);
+
+    Array.from(allIds).forEach((id) => {
+      const row = history.rowsById.get(id) || {};
+      const hasRecent = lastTwo.some((wk) => {
+        if (wk === weekLabel) return safeText(updatesById.get(id));
+        return safeText(row[wk]);
+      });
+      if (hasRecent) return;
+
+      const c = crmById.get(id) || {};
+      const name = safeText(
+        (crmById.has(id) ? getClientName(c) : "") ||
+        row["Client Name"] ||
+        row["Organization"] ||
+        id
+      );
+      const country = safeText((crmById.has(id) ? getClientCountry(c) : "") || row["Country"] || "-");
+      stuckLines.push(`- ${name} (${country})`);
+    });
+    stuckLines.sort((a, b) => a.localeCompare(b));
+  }
+
+  const reminderLines = [];
+  clients.forEach((c) => {
+    const priority = getClientPriority(c);
+    const stage = getClientStage(c);
+    const isPriority = priority.toLowerCase() === "high";
+    const isNegotiation = stage.toLowerCase() === "negotiation";
+    if (!isPriority && !isNegotiation) return;
+    reminderLines.push(`- ${getClientName(c)} (${getClientCountry(c)}) | Priority: ${priority || "-"} | Stage: ${stage || "-"}`);
+  });
+  reminderLines.sort((a, b) => a.localeCompare(b));
+
+  return [
+    `${weekLabel} Summary`,
+    "",
+    "Updated clients:",
+    ...(updatedLines.length ? updatedLines : ["- None"]),
+    "",
+    "Stuck clients (no update for 2+ weeks):",
+    ...(stuckLines.length ? stuckLines : [history ? "- None" : "- History not available (upload last report to enable)."]),
+    "",
+    "High priority reminders:",
+    ...(reminderLines.length ? reminderLines : ["- None"]),
+  ].join("\n");
+}
+
+async function generateWeeklySummaryText() {
+  const weekLabel = el.weekLabelInput ? el.weekLabelInput.value : getDefaultWeekLabel();
+  const progressSource = el.progressSourceSelect ? el.progressSourceSelect.value : "latest";
+  const manualMappingText = el.manualProgressInput ? el.manualProgressInput.value : "";
+  const existingFile = el.existingWeeklyFile && el.existingWeeklyFile.files ? el.existingWeeklyFile.files[0] : null;
+
+  const clients = await getExportClients();
+  const updatesById = getProgressUpdatesByClient(clients, {
+    progressSource,
+    manualMappingText,
+  });
+  const history = await readUploadedClientsHistory(existingFile);
+  const summaryText = buildWeeklySummaryText({
+    weekLabel,
+    clients,
+    updatesById,
+    history,
+  });
+
+  if (el.weeklySummaryText) {
+    el.weeklySummaryText.value = summaryText;
+  }
+}
+
+async function exportWeeklyProgressExcel(options = {}) {
+  try {
+    const weekLabel = safeText(options.weekLabel || getDefaultWeekLabel());
+    const progressSource = safeText(options.progressSource || "latest");
+    const manualMappingText = options.manualMappingText || "";
+    const existingFile = options.existingFile || null;
+
+    const clients = await getExportClients();
+    const updatesById = getProgressUpdatesByClient(clients, {
+      progressSource,
+      manualMappingText,
+    });
+    if (window.excelExport && typeof window.excelExport.exportWeeklyWorkbook === "function") {
+      await window.excelExport.exportWeeklyWorkbook({
+        clients,
+        updatesById,
+        weekLabel,
+        existingFile,
+        includeSummary: true,
+      });
+      return;
+    }
+
+    console.warn("[app] excelExport module missing; falling back to JSON export.");
+    const blob = new Blob([JSON.stringify(clients, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Weekly_Client_Progress_${sanitizeFilenameToken(weekLabel)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.warn("[app] Weekly export failed.", err);
+    alert("Weekly Excel export failed.");
+  }
+}
+
+async function exportJSON() {
+  try {
+    const clients = await getExportClients();
+    const blob = new Blob([JSON.stringify(clients, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `xenta_distributors_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.warn("[app] JSON export failed.", err);
+    alert("JSON export failed.");
+  }
 }
 
 function importJSON(file) {
@@ -441,89 +779,151 @@ function clearAll() {
 // ---------------------------
 // Event Listeners
 // ---------------------------
-el.form.addEventListener("submit", (e) => {
-  e.preventDefault();
+if (el.form) {
+  el.form.addEventListener("submit", (e) => {
+    e.preventDefault();
 
-  const data = getFormData();
-  const err = validateData(data);
-  if (err) {
-    alert(err);
-    return;
-  }
+    const data = getFormData();
+    const err = validateData(data);
+    if (err) {
+      alert(err);
+      return;
+    }
 
-  if (currentEditId) {
-    updateDistributor(currentEditId, data);
-  } else {
-    createDistributor(data);
-  }
+    if (currentEditId) {
+      updateDistributor(currentEditId, data);
+    } else {
+      createDistributor(data);
+    }
 
-  resetForm();
-  render();
-});
+    resetForm();
+    render();
+  });
+}
 
-el.btnReset.addEventListener("click", () => {
-  resetForm();
-});
+if (el.btnReset) {
+  el.btnReset.addEventListener("click", () => {
+    resetForm();
+  });
+}
 
-el.search.addEventListener("input", render);
-el.filterCountry.addEventListener("change", render);
-el.filterLevel.addEventListener("change", render);
-el.filterStatus.addEventListener("change", render);
+if (el.search) el.search.addEventListener("input", render);
+if (el.filterCountry) el.filterCountry.addEventListener("change", render);
+if (el.filterLevel) el.filterLevel.addEventListener("change", render);
+if (el.filterStatus) el.filterStatus.addEventListener("change", render);
 
-el.btnExport.addEventListener("click", exportJSON);
+if (el.btnExport) el.btnExport.addEventListener("click", exportJSON);
+if (el.btnExportWeekly) {
+  el.btnExportWeekly.addEventListener("click", () => {
+    if (el.weekLabelInput && !safeText(el.weekLabelInput.value)) {
+      el.weekLabelInput.value = getDefaultWeekLabel();
+    }
+    syncManualMappingVisibility();
+    toggleWeeklyPanel(true);
+  });
+}
 
-el.btnImport.addEventListener("click", () => {
-  el.importFile.click();
-});
+if (el.btnCloseWeeklyExport) {
+  el.btnCloseWeeklyExport.addEventListener("click", () => toggleWeeklyPanel(false));
+}
 
-el.importFile.addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  importJSON(file);
-  e.target.value = "";
-});
+if (el.progressSourceSelect) {
+  el.progressSourceSelect.addEventListener("change", syncManualMappingVisibility);
+}
 
-el.btnClearAll.addEventListener("click", clearAll);
+if (el.btnRunWeeklyExport) {
+  el.btnRunWeeklyExport.addEventListener("click", () => {
+    exportWeeklyProgressExcel({
+      weekLabel: el.weekLabelInput ? el.weekLabelInput.value : "",
+      progressSource: el.progressSourceSelect ? el.progressSourceSelect.value : "latest",
+      manualMappingText: el.manualProgressInput ? el.manualProgressInput.value : "",
+      existingFile: el.existingWeeklyFile && el.existingWeeklyFile.files ? el.existingWeeklyFile.files[0] : null,
+    });
+  });
+}
+
+if (el.btnGenerateWeeklySummary) {
+  el.btnGenerateWeeklySummary.addEventListener("click", () => {
+    generateWeeklySummaryText();
+  });
+}
+
+if (el.btnCopyWeeklySummary && el.weeklySummaryText) {
+  el.btnCopyWeeklySummary.addEventListener("click", async () => {
+    const text = safeText(el.weeklySummaryText.value);
+    if (!text) {
+      alert("No summary text to copy.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Summary copied.");
+    } catch (_) {
+      el.weeklySummaryText.select();
+      document.execCommand("copy");
+      alert("Summary copied.");
+    }
+  });
+}
+
+if (el.btnImport && el.importFile) {
+  el.btnImport.addEventListener("click", () => {
+    el.importFile.click();
+  });
+}
+
+if (el.importFile) {
+  el.importFile.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    importJSON(file);
+    e.target.value = "";
+  });
+}
+
+if (el.btnClearAll) el.btnClearAll.addEventListener("click", clearAll);
 
 // Table actions
-el.tableBody.addEventListener("click", (e) => {
-  const btn = e.target.closest("button");
-  if (!btn) return;
+if (el.tableBody) {
+  el.tableBody.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
 
-  const action = btn.dataset.action;
-  const id = btn.dataset.id;
+    const action = btn.dataset.action;
+    const id = btn.dataset.id;
 
-  const d = distributors.find(x => x.id === id);
-  if (!d) return;
+    const d = distributors.find(x => x.id === id);
+    if (!d) return;
 
-  if (action === "edit") {
-    editDistributor(id);
-  }
-
-  if (action === "del") {
-    if (!confirm(`Delete ${d.company}?`)) return;
-    deleteDistributor(id);
-    render();
-  }
-
-  if (action === "wa") {
-    if (!d.phone) {
-      alert("No phone number available.");
-      return;
+    if (action === "edit") {
+      editDistributor(id);
     }
-    const msg = generateWhatsAppMessage(d);
-    openWhatsApp(d.phone, msg);
-  }
 
-  if (action === "mail") {
-    if (!d.email) {
-      alert("No email available.");
-      return;
+    if (action === "del") {
+      if (!confirm(`Delete ${d.company}?`)) return;
+      deleteDistributor(id);
+      render();
     }
-    const email = generateEmail(d);
-    openMail(d.email, email.subject, email.body);
-  }
-});
+
+    if (action === "wa") {
+      if (!d.phone) {
+        alert("No phone number available.");
+        return;
+      }
+      const msg = generateWhatsAppMessage(d);
+      openWhatsApp(d.phone, msg);
+    }
+
+    if (action === "mail") {
+      if (!d.email) {
+        alert("No email available.");
+        return;
+      }
+      const email = generateEmail(d);
+      openMail(d.email, email.subject, email.body);
+    }
+  });
+}
 
 // Sort by clicking table headers
 document.querySelectorAll("th[data-sort]").forEach(th => {
@@ -533,28 +933,38 @@ document.querySelectorAll("th[data-sort]").forEach(th => {
 });
 
 // Quick message preview buttons
-el.btnQuickWhatsApp.addEventListener("click", () => {
-  const data = getFormData();
-  const msg = generateWhatsAppMessage(data);
+if (el.btnQuickWhatsApp && el.previewTitle && el.messagePreview) {
+  el.btnQuickWhatsApp.addEventListener("click", () => {
+    const data = getFormData();
+    const msg = generateWhatsAppMessage(data);
 
-  el.previewTitle.textContent = "WhatsApp Message Preview";
-  el.messagePreview.value = msg;
-});
+    el.previewTitle.textContent = "WhatsApp Message Preview";
+    el.messagePreview.value = msg;
+  });
+}
 
-el.btnQuickEmail.addEventListener("click", () => {
-  const data = getFormData();
-  const email = generateEmail(data);
+if (el.btnQuickEmail && el.previewTitle && el.messagePreview) {
+  el.btnQuickEmail.addEventListener("click", () => {
+    const data = getFormData();
+    const email = generateEmail(data);
 
-  el.previewTitle.textContent = "Email Preview";
-  el.messagePreview.value = `Subject: ${email.subject}\n\n${email.body}`;
-});
+    el.previewTitle.textContent = "Email Preview";
+    el.messagePreview.value = `Subject: ${email.subject}\n\n${email.body}`;
+  });
+}
 
 // ---------------------------
 // Init
 // ---------------------------
 function init() {
   distributors = loadDB();
-  render();
+  if (el.weekLabelInput && !safeText(el.weekLabelInput.value)) {
+    el.weekLabelInput.value = getDefaultWeekLabel();
+  }
+  syncManualMappingVisibility();
+  if (el.search && el.filterCountry && el.filterLevel && el.filterStatus && el.tableBody && el.emptyState && el.totalCount) {
+    render();
+  }
 }
 
 init();

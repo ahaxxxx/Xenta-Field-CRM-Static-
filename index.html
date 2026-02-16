@@ -23,6 +23,7 @@
       </select>
 
       <button id="btnExport" class="btn" data-i18n="actions.export">Export JSON</button>
+      <button id="btnExportWeekly" class="btn">Export Weekly Progress (Excel)</button>
       <label class="btn ghost file-btn">
         <span data-i18n="actions.import">Import JSON</span>
         <input id="fileImport" type="file" accept="application/json" />
@@ -30,6 +31,58 @@
       <button id="btnReset" class="btn danger" data-i18n="actions.reset">Reset</button>
     </div>
   </header>
+
+  <section id="weeklyExportPanel" class="export-panel hidden">
+    <div class="panel export-panel-card">
+      <div class="panel-row">
+        <div class="panel-title">Weekly Progress Export</div>
+        <button id="btnCloseWeeklyExport" class="btn ghost" type="button">Close</button>
+      </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label for="weekLabelInput">Week Label</label>
+          <input id="weekLabelInput" class="input" type="text" />
+        </div>
+        <div class="field">
+          <label for="progressSourceSelect">Progress Source</label>
+          <select id="progressSourceSelect" class="select">
+            <option value="latest">A) Latest progress field</option>
+            <option value="weekly">B) Weekly notes field</option>
+            <option value="manual">C) Manual paste mapping</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field hidden" id="manualProgressWrap">
+        <label for="manualProgressInput">Manual Mapping (Client ID[TAB]Update per line)</label>
+        <textarea id="manualProgressInput" class="textarea" rows="6" placeholder="id_abc123[TAB]Followed up via email"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="existingWeeklyFile">Upload last report (optional)</label>
+        <input id="existingWeeklyFile" class="input" type="file" accept=".xlsx" />
+      </div>
+
+      <div class="panel-row">
+        <div class="hint">Exports without page refresh.</div>
+        <div class="top-actions">
+          <button id="btnGenerateWeeklySummary" class="btn ghost" type="button">Generate Weekly Summary Text</button>
+          <button id="btnRunWeeklyExport" class="btn primary" type="button">Export</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="weeklySummaryText">Weekly Summary Text</label>
+        <textarea id="weeklySummaryText" class="textarea" rows="10" readonly placeholder="Click 'Generate Weekly Summary Text'"></textarea>
+      </div>
+
+      <div class="panel-row">
+        <div></div>
+        <button id="btnCopyWeeklySummary" class="btn ghost" type="button">Copy Summary</button>
+      </div>
+    </div>
+  </section>
 
   <main class="layout">
     <!-- LEFT: Filters -->
@@ -279,6 +332,9 @@
     <div class="muted" data-i18n="footer.note">Local-only. No backend. Data stays in your browser.</div>
   </footer>
 
+  <script src="js/dataAdapter.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="js/excelExport.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
