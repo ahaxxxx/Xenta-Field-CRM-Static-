@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Xenta Field CRM (Static)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">X</div>
+      <div>
+        <div class="title" data-i18n="app.title">Xenta Field CRM</div>
+        <div class="subtitle" data-i18n="app.subtitle">Distributor intelligence & follow-up toolkit</div>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <select id="langSelect" class="select">
+        <option value="en">EN</option>
+        <option value="zh">中文</option>
+      </select>
+
+      <button id="btnExport" class="btn" data-i18n="actions.export">Export JSON</button>
+      <label class="btn ghost file-btn">
+        <span data-i18n="actions.import">Import JSON</span>
+        <input id="fileImport" type="file" accept="application/json" />
+      </label>
+      <button id="btnReset" class="btn danger" data-i18n="actions.reset">Reset</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- LEFT: Filters -->
+    <section class="panel">
+      <div class="panel-title" data-i18n="filters.title">Filters</div>
+
+      <div class="field">
+        <label data-i18n="filters.search">Search</label>
+        <input id="qSearch" class="input" placeholder="name / country / brand / notes" />
+      </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label data-i18n="filters.country">Country</label>
+          <input id="qCountry" class="input" placeholder="e.g., Ethiopia" />
+        </div>
+        <div class="field">
+          <label data-i18n="filters.region">Region</label>
+          <select id="qRegion" class="select">
+            <option value="" data-i18n="common.all">All</option>
+            <option value="Africa">Africa</option>
+            <option value="South America">South America</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label data-i18n="filters.stage">Stage</label>
+          <select id="qStage" class="select">
+            <option value="" data-i18n="common.all">All</option>
+            <option value="New">New</option>
+            <option value="Contacted">Contacted</option>
+            <option value="Qualified">Qualified</option>
+            <option value="Quoted">Quoted</option>
+            <option value="Sample">Sample</option>
+            <option value="Registration">Registration</option>
+            <option value="Negotiation">Negotiation</option>
+            <option value="Won">Won</option>
+            <option value="Lost">Lost</option>
+          </select>
+        </div>
+        <div class="field">
+          <label data-i18n="filters.grade">Grade</label>
+          <select id="qGrade" class="select">
+            <option value="" data-i18n="common.all">All</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label data-i18n="filters.focus">Product Focus</label>
+        <select id="qFocus" class="select">
+          <option value="" data-i18n="common.all">All</option>
+          <option value="CLIA POCT">CLIA POCT</option>
+          <option value="FIA">FIA</option>
+          <option value="LFA">LFA</option>
+          <option value="PCR">PCR</option>
+        </select>
+      </div>
+
+      <div class="divider"></div>
+
+      <button id="btnNew" class="btn primary full" data-i18n="actions.new">+ New record</button>
+
+      <div class="hint" data-i18n="filters.hint">
+        Tip: Use Export/Import to sync across devices.
+      </div>
+    </section>
+
+    <!-- CENTER: Table -->
+    <section class="panel wide">
+      <div class="panel-row">
+        <div class="panel-title" data-i18n="table.title">Leads</div>
+        <div class="pill" id="countPill">0</div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table" id="leadTable">
+          <thead>
+            <tr>
+              <th data-sort="name" data-i18n="table.name">Name</th>
+              <th data-sort="country" data-i18n="table.country">Country</th>
+              <th data-sort="region" data-i18n="table.region">Region</th>
+              <th data-sort="stage" data-i18n="table.stage">Stage</th>
+              <th data-sort="grade" data-i18n="table.grade">Grade</th>
+              <th data-sort="lastContact" data-i18n="table.last">Last</th>
+              <th data-i18n="table.actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="leadTbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- RIGHT: Details + Message Generator -->
+    <section class="panel">
+      <div class="panel-title" data-i18n="details.title">Details</div>
+
+      <div id="emptyState" class="empty">
+        <div class="empty-big" data-i18n="details.emptyTitle">Select a record</div>
+        <div class="empty-sub" data-i18n="details.emptySub">or create a new one to start.</div>
+      </div>
+
+      <div id="detailForm" class="hidden">
+        <div class="field">
+          <label data-i18n="details.name">Name</label>
+          <input id="fName" class="input" />
+        </div>
+
+        <div class="grid2">
+          <div class="field">
+            <label data-i18n="details.country">Country</label>
+            <input id="fCountry" class="input" />
+          </div>
+          <div class="field">
+            <label data-i18n="details.region">Region</label>
+            <select id="fRegion" class="select">
+              <option value="Africa">Africa</option>
+              <option value="South America">South America</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div class="field">
+            <label data-i18n="details.stage">Stage</label>
+            <select id="fStage" class="select">
+              <option value="New">New</option>
+              <option value="Contacted">Contacted</option>
+              <option value="Qualified">Qualified</option>
+              <option value="Quoted">Quoted</option>
+              <option value="Sample">Sample</option>
+              <option value="Registration">Registration</option>
+              <option value="Negotiation">Negotiation</option>
+              <option value="Won">Won</option>
+              <option value="Lost">Lost</option>
+            </select>
+          </div>
+          <div class="field">
+            <label data-i18n="details.grade">Grade</label>
+            <select id="fGrade" class="select">
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label data-i18n="details.contacts">Contacts</label>
+          <input id="fWhatsapp" class="input" placeholder="WhatsApp / Phone" />
+          <input id="fEmail" class="input" placeholder="Email" />
+          <input id="fLinkedIn" class="input" placeholder="LinkedIn URL" />
+        </div>
+
+        <div class="field">
+          <label data-i18n="details.brands">Brands / Competitors</label>
+          <input id="fBrands" class="input" placeholder="e.g., Wondfo, Mindray, Snibe" />
+        </div>
+
+        <div class="field">
+          <label data-i18n="details.focus">Product Focus</label>
+          <select id="fFocus" class="select">
+            <option value="CLIA POCT">CLIA POCT</option>
+            <option value="FIA">FIA</option>
+            <option value="LFA">LFA</option>
+            <option value="PCR">PCR</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label data-i18n="details.notes">Notes</label>
+          <textarea id="fNotes" class="textarea" rows="5"></textarea>
+        </div>
+
+        <div class="grid2">
+          <div class="field">
+            <label data-i18n="details.last">Last contact</label>
+            <input id="fLastContact" class="input" placeholder="YYYY-MM-DD" />
+          </div>
+          <div class="field">
+            <label data-i18n="details.next">Next step</label>
+            <input id="fNextStep" class="input" placeholder="e.g., send catalog, schedule call" />
+          </div>
+        </div>
+
+        <div class="panel-row">
+          <button id="btnSave" class="btn primary" data-i18n="actions.save">Save</button>
+          <button id="btnDelete" class="btn danger" data-i18n="actions.delete">Delete</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="panel-title" data-i18n="msg.title">Message Generator</div>
+
+        <div class="grid2">
+          <div class="field">
+            <label data-i18n="msg.channel">Channel</label>
+            <select id="mChannel" class="select">
+              <option value="email">Email</option>
+              <option value="whatsapp">WhatsApp</option>
+            </select>
+          </div>
+          <div class="field">
+            <label data-i18n="msg.lang">Language</label>
+            <select id="mLang" class="select">
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+              <option value="es">Español</option>
+              <option value="ar">العربية</option>
+              <option value="zh">中文</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label data-i18n="msg.type">Template</label>
+          <select id="mTemplate" class="select">
+            <option value="intro" data-i18n="msg.tpl.intro">Intro / Product pitch</option>
+            <option value="catalog" data-i18n="msg.tpl.catalog">Send catalog</option>
+            <option value="meeting" data-i18n="msg.tpl.meeting">Schedule meeting</option>
+            <option value="followup" data-i18n="msg.tpl.followup">Follow up</option>
+          </select>
+        </div>
+
+        <div class="panel-row">
+          <button id="btnGenerate" class="btn" data-i18n="actions.generate">Generate</button>
+          <button id="btnCopy" class="btn ghost" data-i18n="actions.copy">Copy</button>
+        </div>
+
+        <div class="field">
+          <label data-i18n="msg.output">Output</label>
+          <textarea id="mOutput" class="textarea" rows="10" readonly></textarea>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div>© <span id="year"></span> Xenta Field CRM (Static)</div>
+    <div class="muted" data-i18n="footer.note">Local-only. No backend. Data stays in your browser.</div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
