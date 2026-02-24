@@ -23,7 +23,7 @@
       </select>
 
       <button id="btnExport" class="btn" data-i18n="actions.export">Export JSON</button>
-      <button id="btnExportWeekly" class="btn">Export Weekly Progress (Excel)</button>
+      <button id="btnExportWeekly" class="btn" data-i18n="weekly.title">Export Weekly Progress (Excel)</button>
       <label class="btn ghost file-btn">
         <span data-i18n="actions.import">Import JSON</span>
         <input id="fileImport" type="file" accept="application/json" />
@@ -35,58 +35,58 @@
   <section id="weeklyExportPanel" class="export-panel hidden">
     <div class="panel export-panel-card">
       <div class="panel-row">
-        <div class="panel-title">Weekly Progress Export</div>
-        <button id="btnCloseWeeklyExport" class="btn ghost" type="button">Close</button>
+        <div class="panel-title" data-i18n="weekly.title">Weekly Progress Export</div>
+        <button id="btnCloseWeeklyExport" class="btn ghost" type="button" data-i18n="weekly.close">Close</button>
       </div>
 
       <div class="grid2">
         <div class="field">
-          <label for="weekLabelInput">Week Label</label>
+          <label for="weekLabelInput" data-i18n="weekly.weekLabel">Week Label</label>
           <input id="weekLabelInput" class="input" type="text" />
         </div>
         <div class="field">
-          <label for="progressSourceSelect">Progress Source</label>
+          <label for="progressSourceSelect" data-i18n="weekly.progressSource">Progress Source</label>
           <select id="progressSourceSelect" class="select">
-            <option value="latest">A) Latest progress field</option>
-            <option value="weekly">B) Weekly notes field</option>
-            <option value="manual">C) Manual paste mapping</option>
+            <option value="latest" data-i18n="weekly.source.latest">A) Latest progress field</option>
+            <option value="weekly" data-i18n="weekly.source.weekly">B) Weekly notes field</option>
+            <option value="manual" data-i18n="weekly.source.manual">C) Manual paste mapping</option>
           </select>
         </div>
       </div>
 
       <div class="field hidden" id="manualProgressWrap">
-        <label for="manualProgressInput">Manual Mapping (Client ID[TAB]Update per line)</label>
+        <label for="manualProgressInput" data-i18n="weekly.manualMapping">Manual Mapping (Client ID[TAB]Update per line)</label>
         <textarea id="manualProgressInput" class="textarea" rows="6" placeholder="id_abc123[TAB]Followed up via email"></textarea>
       </div>
 
       <div class="field">
-        <label for="existingWeeklyFile">Upload last report (optional)</label>
+        <label for="existingWeeklyFile" data-i18n="weekly.uploadExisting">Upload last report (optional)</label>
         <input id="existingWeeklyFile" class="input" type="file" accept=".xlsx" />
       </div>
 
       <div class="panel-row">
-        <div class="hint">Exports without page refresh.</div>
+        <div class="hint" data-i18n="weekly.hint">Exports without page refresh.</div>
         <div class="top-actions">
-          <button id="btnGenerateWeeklySummary" class="btn ghost" type="button">Generate Weekly Summary Text</button>
-          <button id="btnRunWeeklyExport" class="btn primary" type="button">Export</button>
+          <button id="btnGenerateWeeklySummary" class="btn ghost" type="button" data-i18n="weekly.generateSummary">Generate Weekly Summary Text</button>
+          <button id="btnRunWeeklyExport" class="btn primary" type="button" data-i18n="weekly.export">Export</button>
         </div>
       </div>
 
       <div class="field">
-        <label for="weeklySummaryText">Weekly Summary Text</label>
+        <label for="weeklySummaryText" data-i18n="weekly.summaryText">Weekly Summary Text</label>
         <textarea id="weeklySummaryText" class="textarea" rows="10" readonly placeholder="Click 'Generate Weekly Summary Text'"></textarea>
       </div>
 
       <div class="panel-row">
         <div></div>
-        <button id="btnCopyWeeklySummary" class="btn ghost" type="button">Copy Summary</button>
+        <button id="btnCopyWeeklySummary" class="btn ghost" type="button" data-i18n="weekly.copySummary">Copy Summary</button>
       </div>
     </div>
   </section>
 
   <main class="layout">
     <!-- LEFT: Filters -->
-    <section class="panel">
+    <section class="panel panel-filters">
       <div class="panel-title" data-i18n="filters.title">Filters</div>
 
       <div class="field">
@@ -158,10 +158,18 @@
     </section>
 
     <!-- CENTER: Table -->
-    <section class="panel wide">
+    <section class="panel panel-leads wide">
       <div class="panel-row">
         <div class="panel-title" data-i18n="table.title">Leads</div>
-        <div class="pill" id="countPill">0</div>
+        <div class="top-actions">
+          <button id="btnSortMode" class="btn ghost" type="button" data-i18n="actions.sortByLastContact">Sort by Last Contact</button>
+          <div class="pill" id="countPill">0</div>
+        </div>
+      </div>
+
+      <div class="top5-panel">
+        <div class="top5-title" data-i18n="top5.title">&#128293; Today&apos;s Top 5</div>
+        <div id="todayTop5List"></div>
       </div>
 
       <div class="table-wrap">
@@ -173,7 +181,8 @@
               <th data-sort="region" data-i18n="table.region">Region</th>
               <th data-sort="stage" data-i18n="table.stage">Stage</th>
               <th data-sort="grade" data-i18n="table.grade">Grade</th>
-              <th data-sort="lastContact" data-i18n="table.last">Last</th>
+              <th data-sort="lastContactDate" data-i18n="table.last">Last</th>
+              <th data-sort="score" data-i18n="table.score">&#128293; Score</th>
               <th data-i18n="table.actions">Actions</th>
             </tr>
           </thead>
@@ -183,7 +192,7 @@
     </section>
 
     <!-- RIGHT: Details + Message Generator -->
-    <section class="panel">
+    <section class="panel panel-details">
       <div class="panel-title" data-i18n="details.title">Details</div>
 
       <div id="emptyState" class="empty">

@@ -1,11 +1,187 @@
 /**************************************/
 
 const DB_KEY = "xenta_crm_distributors_v1";
+const LANG_KEY = "xenta_crm_lang";
 
 let distributors = [];
 let currentEditId = null;
+let currentLang = "en";
 
-let sortState = { key: "updatedAt", direction: "desc" };
+let sortState = { key: "score", direction: "desc" };
+let sortMode = "score";
+
+const followUpDays = {
+  A: 2,
+  B: 5,
+  C: 10,
+  D: 30,
+};
+
+const gradeWeightMap = {
+  A: 3,
+  B: 2,
+  C: 1,
+  D: 0.5,
+};
+
+const stageWeightMap = {
+  new: 1,
+  contacted: 2,
+  negotiation: 5,
+  quotation: 6,
+  quoted: 6,
+  contract: 8,
+  closed: 0,
+};
+
+const i18n = {
+  en: {
+    "app.title": "Xenta Field CRM",
+    "app.subtitle": "Distributor intelligence & follow-up toolkit",
+    "actions.export": "Export JSON",
+    "actions.import": "Import JSON",
+    "actions.reset": "Reset",
+    "actions.new": "+ New record",
+    "actions.save": "Save",
+    "actions.delete": "Delete",
+    "actions.generate": "Generate",
+    "actions.copy": "Copy",
+    "actions.sortByScore": "Sort by Score",
+    "actions.sortByLastContact": "Sort by Last Contact",
+    "common.all": "All",
+    "filters.title": "Filters",
+    "filters.search": "Search",
+    "filters.country": "Country",
+    "filters.region": "Region",
+    "filters.stage": "Stage",
+    "filters.grade": "Grade",
+    "filters.focus": "Product Focus",
+    "filters.hint": "Tip: Use Export/Import to sync across devices.",
+    "table.title": "Leads",
+    "table.name": "Name",
+    "table.country": "Country",
+    "table.region": "Region",
+    "table.stage": "Stage",
+    "table.grade": "Grade",
+    "table.last": "Last",
+    "table.score": "🔥 Score",
+    "table.actions": "Actions",
+    "top5.title": "🔥 Today’s Top 5",
+    "top5.empty": "No due follow-ups today.",
+    "status.due": "Due",
+    "details.title": "Details",
+    "details.emptyTitle": "Select a record",
+    "details.emptySub": "or create a new one to start.",
+    "details.name": "Name",
+    "details.country": "Country",
+    "details.region": "Region",
+    "details.stage": "Stage",
+    "details.grade": "Grade",
+    "details.contacts": "Contacts",
+    "details.brands": "Brands / Competitors",
+    "details.focus": "Product Focus",
+    "details.notes": "Notes",
+    "details.last": "Last contact",
+    "details.next": "Next step",
+    "msg.title": "Message Generator",
+    "msg.channel": "Channel",
+    "msg.lang": "Language",
+    "msg.type": "Template",
+    "msg.output": "Output",
+    "msg.tpl.intro": "Intro / Product pitch",
+    "msg.tpl.catalog": "Send catalog",
+    "msg.tpl.meeting": "Schedule meeting",
+    "msg.tpl.followup": "Follow up",
+    "footer.note": "Local-only. No backend. Data stays in your browser.",
+    "weekly.title": "Weekly Progress Export",
+    "weekly.close": "Close",
+    "weekly.weekLabel": "Week Label",
+    "weekly.progressSource": "Progress Source",
+    "weekly.source.latest": "A) Latest progress field",
+    "weekly.source.weekly": "B) Weekly notes field",
+    "weekly.source.manual": "C) Manual paste mapping",
+    "weekly.manualMapping": "Manual Mapping (Client ID[TAB]Update per line)",
+    "weekly.uploadExisting": "Upload last report (optional)",
+    "weekly.hint": "Exports without page refresh.",
+    "weekly.generateSummary": "Generate Weekly Summary Text",
+    "weekly.export": "Export",
+    "weekly.summaryText": "Weekly Summary Text",
+    "weekly.copySummary": "Copy Summary",
+  },
+  zh: {
+    "app.title": "Xenta 外勤 CRM",
+    "app.subtitle": "经销商情报与跟进工具",
+    "actions.export": "导出 JSON",
+    "actions.import": "导入 JSON",
+    "actions.reset": "重置",
+    "actions.new": "+ 新建客户",
+    "actions.save": "保存",
+    "actions.delete": "删除",
+    "actions.generate": "生成",
+    "actions.copy": "复制",
+    "actions.sortByScore": "按评分排序",
+    "actions.sortByLastContact": "按最近联系排序",
+    "common.all": "全部",
+    "filters.title": "筛选",
+    "filters.search": "搜索",
+    "filters.country": "国家",
+    "filters.region": "区域",
+    "filters.stage": "阶段",
+    "filters.grade": "等级",
+    "filters.focus": "产品方向",
+    "filters.hint": "提示：可用导出/导入在设备间同步。",
+    "table.title": "客户列表",
+    "table.name": "名称",
+    "table.country": "国家",
+    "table.region": "区域",
+    "table.stage": "阶段",
+    "table.grade": "等级",
+    "table.last": "最近联系",
+    "table.score": "🔥 评分",
+    "table.actions": "操作",
+    "top5.title": "🔥 今日优先 Top 5",
+    "top5.empty": "今天没有到期跟进客户。",
+    "status.due": "到期",
+    "details.title": "详情",
+    "details.emptyTitle": "请选择一条记录",
+    "details.emptySub": "或先新建一条记录。",
+    "details.name": "名称",
+    "details.country": "国家",
+    "details.region": "区域",
+    "details.stage": "阶段",
+    "details.grade": "等级",
+    "details.contacts": "联系方式",
+    "details.brands": "品牌 / 竞品",
+    "details.focus": "产品方向",
+    "details.notes": "备注",
+    "details.last": "最近联系",
+    "details.next": "下一步",
+    "msg.title": "消息生成",
+    "msg.channel": "渠道",
+    "msg.lang": "语言",
+    "msg.type": "模板",
+    "msg.output": "输出",
+    "msg.tpl.intro": "介绍 / 产品推荐",
+    "msg.tpl.catalog": "发送目录",
+    "msg.tpl.meeting": "安排会议",
+    "msg.tpl.followup": "跟进",
+    "footer.note": "纯本地运行，无后端，数据保存在浏览器。",
+    "weekly.title": "周进展导出",
+    "weekly.close": "关闭",
+    "weekly.weekLabel": "周标签",
+    "weekly.progressSource": "进展来源",
+    "weekly.source.latest": "A) 最新进展字段",
+    "weekly.source.weekly": "B) 周备注字段",
+    "weekly.source.manual": "C) 手动粘贴映射",
+    "weekly.manualMapping": "手动映射（每行：客户ID[TAB]更新）",
+    "weekly.uploadExisting": "上传上周报表（可选）",
+    "weekly.hint": "无需刷新页面即可导出。",
+    "weekly.generateSummary": "生成周总结文本",
+    "weekly.export": "导出",
+    "weekly.summaryText": "周总结文本",
+    "weekly.copySummary": "复制总结",
+  },
+};
 
 // ---------------------------
 // Utilities
@@ -26,6 +202,129 @@ function formatDate(iso) {
 
 function safeText(s) {
   return (s || "").toString().trim();
+}
+
+function t(key) {
+  const dict = i18n[currentLang] || i18n.en;
+  return dict[key] || i18n.en[key] || key;
+}
+
+function applyI18n() {
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    const key = node.getAttribute("data-i18n");
+    if (!key) return;
+    node.textContent = t(key);
+  });
+  document.documentElement.lang = currentLang;
+}
+
+function setLanguage(lang, options = {}) {
+  const normalized = safeText(lang).toLowerCase();
+  currentLang = i18n[normalized] ? normalized : "en";
+  if (options.persist !== false) {
+    try {
+      localStorage.setItem(LANG_KEY, currentLang);
+    } catch (_) {}
+  }
+  applyI18n();
+  if (options.rerender) render();
+}
+
+function detectInitialLanguage() {
+  let saved = "";
+  try {
+    saved = safeText(localStorage.getItem(LANG_KEY)).toLowerCase();
+  } catch (_) {}
+  if (saved && i18n[saved]) return saved;
+  return "en";
+}
+
+function todayDateISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeGrade(rawGrade) {
+  const g = safeText(rawGrade).toUpperCase();
+  return followUpDays[g] ? g : "C";
+}
+
+function ensureClientSafety(rawClient) {
+  const client = { ...(rawClient || {}) };
+  const safeGrade = normalizeGrade(client.grade || client.level);
+  const safeStage = safeText(client.stage || client.status) || "New";
+  const safePriority = safeText(client.priority) || "Normal";
+  const safeLastContactDate = safeText(
+    client.lastContactDate || client.lastContact || client.updatedAt || client.updated_at
+  ) || todayDateISO();
+
+  client.name = safeText(client.name || client.company);
+  client.priority = safePriority;
+  client.grade = safeGrade;
+  client.stage = safeStage;
+  client.lastContactDate = safeLastContactDate;
+
+  return client;
+}
+
+function getDaysSinceLastContact(rawClient) {
+  const client = ensureClientSafety(rawClient);
+  const lastDate = new Date(client.lastContactDate);
+  if (!Number.isFinite(lastDate.getTime())) return 0;
+  const ms = Date.now() - lastDate.getTime();
+  const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+  return Math.max(0, days);
+}
+
+function isFollowUpDue(rawClient) {
+  const client = ensureClientSafety(rawClient);
+  const cadenceDays = followUpDays[client.grade] || followUpDays.C;
+  return getDaysSinceLastContact(client) >= cadenceDays;
+}
+
+function calculateFollowUpScore(rawClient) {
+  const client = ensureClientSafety(rawClient);
+  const daysSinceLastContact = getDaysSinceLastContact(client);
+  const gradeWeight = gradeWeightMap[client.grade] || gradeWeightMap.C;
+  const stageWeight = stageWeightMap[safeText(client.stage).toLowerCase()] ?? 0;
+  const priorityBonus = safeText(client.priority).toLowerCase() === "high" ? 5 : 0;
+
+  const score = (daysSinceLastContact * gradeWeight) + stageWeight + priorityBonus;
+  return Math.round(score);
+}
+
+function enrichClient(rawClient) {
+  const client = ensureClientSafety(rawClient);
+  const daysSinceLastContact = getDaysSinceLastContact(client);
+  const score = calculateFollowUpScore(client);
+  const isDue = isFollowUpDue(client);
+
+  return {
+    ...client,
+    daysSinceLastContact,
+    score,
+    followUpScore: score,
+    isDue,
+  };
+}
+
+function normalizeClientCollection(rawClients) {
+  const list = Array.isArray(rawClients) ? rawClients : [];
+  let changed = false;
+  const normalized = list.map((raw) => {
+    const before = raw || {};
+    const after = ensureClientSafety(before);
+    if (
+      safeText(before.priority) !== safeText(after.priority) ||
+      safeText(before.grade) !== safeText(after.grade) ||
+      safeText(before.stage) !== safeText(after.stage) ||
+      safeText(before.lastContactDate) !== safeText(after.lastContactDate) ||
+      safeText(before.name) !== safeText(after.name)
+    ) {
+      changed = true;
+    }
+    return after;
+  });
+  return { normalized, changed };
 }
 
 function xmlEscape(value) {
@@ -145,82 +444,122 @@ Xenta Biotech (Guangzhou) Medical Technology Co., Ltd.`;
 // ---------------------------
 // DOM Elements
 // ---------------------------
+function pickEl(...selectors) {
+  for (const s of selectors) {
+    const node = document.querySelector(s);
+    if (node) return node;
+  }
+  return null;
+}
+
 const el = {
-  form: document.querySelector("#distributorForm"),
-  company: document.querySelector("#company"),
-  country: document.querySelector("#country"),
-  city: document.querySelector("#city"),
-  contactName: document.querySelector("#contactName"),
-  role: document.querySelector("#role"),
-  phone: document.querySelector("#phone"),
-  email: document.querySelector("#email"),
-  website: document.querySelector("#website"),
-  brands: document.querySelector("#brands"),
-  interest: document.querySelector("#interest"),
-  level: document.querySelector("#level"),
-  status: document.querySelector("#status"),
-  notes: document.querySelector("#notes"),
+  form: pickEl("#distributorForm"),
+  detailForm: pickEl("#detailForm"),
+  company: pickEl("#company", "#fName"),
+  country: pickEl("#country", "#fCountry"),
+  city: pickEl("#city"),
+  contactName: pickEl("#contactName"),
+  role: pickEl("#role"),
+  phone: pickEl("#phone", "#fWhatsapp"),
+  email: pickEl("#email", "#fEmail"),
+  website: pickEl("#website", "#fLinkedIn"),
+  brands: pickEl("#brands", "#fBrands"),
+  interest: pickEl("#interest", "#fFocus"),
+  level: pickEl("#level", "#fGrade"),
+  status: pickEl("#status", "#fStage"),
+  notes: pickEl("#notes", "#fNotes"),
+  priority: pickEl("#priority", "#fPriority"),
+  lastContactDate: pickEl("#lastContactDate", "#fLastContact"),
 
-  btnSave: document.querySelector("#btnSave"),
-  btnReset: document.querySelector("#btnReset"),
+  btnSave: pickEl("#btnSave"),
+  btnReset: pickEl("#btnReset"),
+  btnNew: pickEl("#btnNew"),
+  langSelect: pickEl("#langSelect"),
+  btnSortMode: pickEl("#btnSortMode"),
 
-  search: document.querySelector("#search"),
-  filterCountry: document.querySelector("#filterCountry"),
-  filterLevel: document.querySelector("#filterLevel"),
-  filterStatus: document.querySelector("#filterStatus"),
+  search: pickEl("#search", "#qSearch"),
+  filterCountry: pickEl("#filterCountry", "#qCountry"),
+  filterLevel: pickEl("#filterLevel", "#qGrade"),
+  filterStatus: pickEl("#filterStatus", "#qStage"),
 
-  tableBody: document.querySelector("#tableBody"),
-  emptyState: document.querySelector("#emptyState"),
-  totalCount: document.querySelector("#totalCount"),
+  tableBody: pickEl("#tableBody", "#leadTbody"),
+  emptyState: pickEl("#emptyState"),
+  totalCount: pickEl("#totalCount", "#countPill"),
+  todayTop5List: pickEl("#todayTop5List"),
 
-  btnExport: document.querySelector("#btnExport"),
-  btnExportWeekly: document.querySelector("#btnExportWeekly"),
-  weeklyExportPanel: document.querySelector("#weeklyExportPanel"),
-  weekLabelInput: document.querySelector("#weekLabelInput"),
-  progressSourceSelect: document.querySelector("#progressSourceSelect"),
-  manualProgressWrap: document.querySelector("#manualProgressWrap"),
-  manualProgressInput: document.querySelector("#manualProgressInput"),
-  existingWeeklyFile: document.querySelector("#existingWeeklyFile"),
-  btnGenerateWeeklySummary: document.querySelector("#btnGenerateWeeklySummary"),
-  weeklySummaryText: document.querySelector("#weeklySummaryText"),
-  btnCopyWeeklySummary: document.querySelector("#btnCopyWeeklySummary"),
-  btnRunWeeklyExport: document.querySelector("#btnRunWeeklyExport"),
-  btnCloseWeeklyExport: document.querySelector("#btnCloseWeeklyExport"),
-  btnImport: document.querySelector("#btnImport"),
-  importFile: document.querySelector("#importFile"),
-  btnClearAll: document.querySelector("#btnClearAll"),
+  btnExport: pickEl("#btnExport"),
+  btnExportWeekly: pickEl("#btnExportWeekly"),
+  weeklyExportPanel: pickEl("#weeklyExportPanel"),
+  weekLabelInput: pickEl("#weekLabelInput"),
+  progressSourceSelect: pickEl("#progressSourceSelect"),
+  manualProgressWrap: pickEl("#manualProgressWrap"),
+  manualProgressInput: pickEl("#manualProgressInput"),
+  existingWeeklyFile: pickEl("#existingWeeklyFile"),
+  btnGenerateWeeklySummary: pickEl("#btnGenerateWeeklySummary"),
+  weeklySummaryText: pickEl("#weeklySummaryText"),
+  btnCopyWeeklySummary: pickEl("#btnCopyWeeklySummary"),
+  btnRunWeeklyExport: pickEl("#btnRunWeeklyExport"),
+  btnCloseWeeklyExport: pickEl("#btnCloseWeeklyExport"),
+  btnImport: pickEl("#btnImport"),
+  importFile: pickEl("#importFile", "#fileImport"),
+  btnClearAll: pickEl("#btnClearAll"),
 
-  btnQuickWhatsApp: document.querySelector("#btnQuickWhatsApp"),
-  btnQuickEmail: document.querySelector("#btnQuickEmail"),
+  btnQuickWhatsApp: pickEl("#btnQuickWhatsApp"),
+  btnQuickEmail: pickEl("#btnQuickEmail"),
 
-  messagePreview: document.querySelector("#messagePreview"),
-  previewTitle: document.querySelector("#previewTitle"),
+  messagePreview: pickEl("#messagePreview", "#mOutput"),
+  previewTitle: pickEl("#previewTitle"),
 };
 
 // ---------------------------
 // CRUD
 // ---------------------------
 function getFormData() {
+  const companyOrName = safeText(el.company ? el.company.value : "");
+  const gradeValue = normalizeGrade(el.level ? el.level.value : "");
+  const stageValue = safeText(el.status ? el.status.value : "") || "New";
+  const lastContactDateValue = safeText(el.lastContactDate ? el.lastContactDate.value : "") || todayDateISO();
+  const priorityValue = safeText(el.priority ? el.priority.value : "") || "Normal";
+
   return {
-    company: safeText(el.company.value),
-    country: safeText(el.country.value),
-    city: safeText(el.city.value),
-    contactName: safeText(el.contactName.value),
-    role: safeText(el.role.value),
-    phone: safeText(el.phone.value),
-    email: safeText(el.email.value),
-    website: safeText(el.website.value),
-    brands: safeText(el.brands.value),
-    interest: safeText(el.interest.value),
-    level: safeText(el.level.value),
-    status: safeText(el.status.value),
-    notes: safeText(el.notes.value),
+    company: companyOrName,
+    name: companyOrName,
+    country: safeText(el.country ? el.country.value : ""),
+    city: safeText(el.city ? el.city.value : ""),
+    contactName: safeText(el.contactName ? el.contactName.value : ""),
+    role: safeText(el.role ? el.role.value : ""),
+    phone: safeText(el.phone ? el.phone.value : ""),
+    email: safeText(el.email ? el.email.value : ""),
+    website: safeText(el.website ? el.website.value : ""),
+    brands: safeText(el.brands ? el.brands.value : ""),
+    interest: safeText(el.interest ? el.interest.value : ""),
+    level: gradeValue,
+    status: stageValue,
+    grade: gradeValue,
+    stage: stageValue,
+    priority: priorityValue,
+    lastContactDate: lastContactDateValue,
+    lastContact: lastContactDateValue,
+    notes: safeText(el.notes ? el.notes.value : ""),
   };
 }
 
 function resetForm() {
+  const fields = [
+    "company", "country", "city", "contactName", "role", "phone",
+    "email", "website", "brands", "interest", "level", "status", "notes", "priority", "lastContactDate"
+  ];
   currentEditId = null;
   if (el.form) el.form.reset();
+  if (!el.form) {
+    fields.forEach((k) => {
+      if (el[k]) el[k].value = "";
+    });
+  }
+  if (el.lastContactDate) el.lastContactDate.value = todayDateISO();
+  if (el.priority) el.priority.value = "Normal";
+  if (el.detailForm) el.detailForm.classList.remove("hidden");
+  if (el.emptyState) el.emptyState.classList.add("hidden");
   if (el.btnSave) el.btnSave.textContent = "Save Distributor";
 }
 
@@ -231,12 +570,12 @@ function validateData(d) {
 }
 
 function createDistributor(d) {
-  const item = {
+  const item = ensureClientSafety({
     id: uid(),
     ...d,
     createdAt: nowISO(),
     updatedAt: nowISO(),
-  };
+  });
   distributors.push(item);
   saveDB();
 }
@@ -245,11 +584,11 @@ function updateDistributor(id, d) {
   const idx = distributors.findIndex(x => x.id === id);
   if (idx === -1) return;
 
-  distributors[idx] = {
+  distributors[idx] = ensureClientSafety({
     ...distributors[idx],
     ...d,
     updatedAt: nowISO(),
-  };
+  });
   saveDB();
 }
 
@@ -263,21 +602,25 @@ function editDistributor(id) {
   if (!d) return;
 
   currentEditId = id;
-  el.company.value = d.company || "";
-  el.country.value = d.country || "";
-  el.city.value = d.city || "";
-  el.contactName.value = d.contactName || "";
-  el.role.value = d.role || "";
-  el.phone.value = d.phone || "";
-  el.email.value = d.email || "";
-  el.website.value = d.website || "";
-  el.brands.value = d.brands || "";
-  el.interest.value = d.interest || "";
-  el.level.value = d.level || "";
-  el.status.value = d.status || "";
-  el.notes.value = d.notes || "";
+  if (el.company) el.company.value = d.company || "";
+  if (el.country) el.country.value = d.country || "";
+  if (el.city) el.city.value = d.city || "";
+  if (el.contactName) el.contactName.value = d.contactName || "";
+  if (el.role) el.role.value = d.role || "";
+  if (el.phone) el.phone.value = d.phone || "";
+  if (el.email) el.email.value = d.email || "";
+  if (el.website) el.website.value = d.website || "";
+  if (el.brands) el.brands.value = d.brands || "";
+  if (el.interest) el.interest.value = d.interest || "";
+  if (el.level) el.level.value = normalizeGrade(d.grade || d.level);
+  if (el.status) el.status.value = safeText(d.stage || d.status);
+  if (el.priority) el.priority.value = safeText(d.priority || "Normal");
+  if (el.lastContactDate) el.lastContactDate.value = safeText(d.lastContactDate || d.lastContact || todayDateISO());
+  if (el.notes) el.notes.value = d.notes || "";
+  if (el.detailForm) el.detailForm.classList.remove("hidden");
+  if (el.emptyState) el.emptyState.classList.add("hidden");
 
-  el.btnSave.textContent = "Update Distributor";
+  if (el.btnSave) el.btnSave.textContent = "Update Distributor";
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -285,22 +628,33 @@ function editDistributor(id) {
 // Filtering & Sorting
 // ---------------------------
 function getFilteredData() {
-  const q = safeText(el.search.value).toLowerCase();
-  const c = safeText(el.filterCountry.value).toLowerCase();
-  const lvl = safeText(el.filterLevel.value);
-  const st = safeText(el.filterStatus.value).toLowerCase();
+  const searchEl = el.search || document.getElementById("search");
+  const filterCountryEl = el.filterCountry || document.getElementById("filterCountry");
+  const filterLevelEl = el.filterLevel || document.getElementById("filterLevel");
+  const filterStatusEl = el.filterStatus || document.getElementById("filterStatus");
+
+  const searchValue = searchEl ? searchEl.value : "";
+  const filterCountryValue = filterCountryEl ? filterCountryEl.value : "";
+  const filterLevelValue = filterLevelEl ? filterLevelEl.value : "";
+  const filterStatusValue = filterStatusEl ? filterStatusEl.value : "";
+
+  const q = safeText(searchValue).toLowerCase();
+  const countryFilter = safeText(filterCountryValue).toLowerCase();
+  const lvl = safeText(filterLevelValue);
+  const st = safeText(filterStatusValue).toLowerCase();
 
   return distributors.filter(d => {
+    const clientSafe = ensureClientSafety(d);
     const text = [
-      d.company, d.country, d.city, d.contactName, d.role,
-      d.phone, d.email, d.website, d.brands, d.interest,
-      d.level, d.status, d.notes
+      clientSafe.name, clientSafe.company, clientSafe.country, clientSafe.city, clientSafe.region, clientSafe.contactName, clientSafe.role,
+      clientSafe.phone, clientSafe.email, clientSafe.website, clientSafe.brands, clientSafe.interest, clientSafe.priority,
+      clientSafe.grade, clientSafe.level, clientSafe.stage, clientSafe.status, clientSafe.notes
     ].join(" ").toLowerCase();
 
     const matchQ = !q || text.includes(q);
-    const matchCountry = !c || safeText(d.country).toLowerCase() === c;
-    const matchLevel = !lvl || safeText(d.level) === lvl;
-    const matchStatus = !st || safeText(d.status).toLowerCase() === st;
+    const matchCountry = !countryFilter || safeText(clientSafe.country).toLowerCase() === countryFilter;
+    const matchLevel = !lvl || normalizeGrade(clientSafe.grade || clientSafe.level) === normalizeGrade(lvl);
+    const matchStatus = !st || safeText(clientSafe.stage || clientSafe.status).toLowerCase() === st;
 
     return matchQ && matchCountry && matchLevel && matchStatus;
   });
@@ -311,6 +665,14 @@ function sortData(data) {
   const dir = direction === "asc" ? 1 : -1;
 
   return [...data].sort((a, b) => {
+    if (key === "score") {
+      return ((a.score || 0) - (b.score || 0)) * dir;
+    }
+    if (key === "lastContactDate") {
+      const ta = new Date(safeText(a.lastContactDate)).getTime() || 0;
+      const tb = new Date(safeText(b.lastContactDate)).getTime() || 0;
+      return (ta - tb) * dir;
+    }
     const va = safeText(a[key]);
     const vb = safeText(b[key]);
 
@@ -326,7 +688,20 @@ function setSort(key) {
     sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
   } else {
     sortState.key = key;
-    sortState.direction = "asc";
+    sortState.direction = key === "score" ? "desc" : "asc";
+  }
+  if (key === "score") sortMode = "score";
+  if (key === "lastContactDate") sortMode = "lastContact";
+  render();
+}
+
+function toggleSortMode() {
+  if (sortMode === "score") {
+    sortMode = "lastContact";
+    sortState = { key: "lastContactDate", direction: "desc" };
+  } else {
+    sortMode = "score";
+    sortState = { key: "score", direction: "desc" };
   }
   render();
 }
@@ -335,46 +710,87 @@ function setSort(key) {
 // Rendering
 // ---------------------------
 function renderFilters(data) {
+  if (!el.filterCountry) return;
   const countries = [...new Set(data.map(x => safeText(x.country)).filter(Boolean))].sort();
 
-  const current = el.filterCountry.value;
-  el.filterCountry.innerHTML = `<option value="">All Countries</option>` +
-    countries.map(c => `<option value="${c}">${c}</option>`).join("");
+  const current = safeText(el.filterCountry.value);
+  if (el.filterCountry.tagName === "SELECT") {
+    el.filterCountry.innerHTML = `<option value="">All Countries</option>` +
+      countries.map(c => `<option value="${c}">${c}</option>`).join("");
 
-  if (countries.includes(current)) {
-    el.filterCountry.value = current;
+    if (countries.includes(current)) {
+      el.filterCountry.value = current;
+    }
   }
 }
 
-function renderTable(data) {
-  el.tableBody.innerHTML = "";
+function scoreClass(score) {
+  if (score >= 25) return "score-badge score-red";
+  if (score >= 15) return "score-badge score-orange";
+  if (score >= 8) return "score-badge score-yellow";
+  return "score-badge score-gray";
+}
 
-  if (!data.length) {
-    el.emptyState.classList.remove("hidden");
+function renderTodayTop5(data) {
+  if (!el.todayTop5List) return;
+  const dueTop5 = [...data]
+    .filter((c) => c.isDue)
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, 5);
+
+  if (!dueTop5.length) {
+    el.todayTop5List.innerHTML = `<div class="top5-empty">${t("top5.empty")}</div>`;
     return;
   }
 
-  el.emptyState.classList.add("hidden");
+  el.todayTop5List.innerHTML = dueTop5.map((c) => `
+    <div class="top5-item">
+      <div class="top5-main">${safeText(c.name) || "-"}</div>
+      <div class="top5-meta">${safeText(c.country) || "-"} | ${safeText(c.stage) || "-"} | ${c.daysSinceLastContact}d</div>
+    </div>
+  `).join("");
+}
 
-  data.forEach(d => {
+function updateSortModeButton() {
+  if (!el.btnSortMode) return;
+  el.btnSortMode.textContent = sortMode === "score" ? t("actions.sortByLastContact") : t("actions.sortByScore");
+}
+
+function renderTable(data) {
+  if (!el.tableBody) return;
+  el.tableBody.innerHTML = "";
+
+  if (!data.length) {
+    if (el.emptyState) el.emptyState.classList.remove("hidden");
+    return;
+  }
+
+  if (el.emptyState) el.emptyState.classList.add("hidden");
+
+  data.forEach(client => {
     const tr = document.createElement("tr");
+    const name = safeText(client.name || client.company);
+    const country = safeText(client.country);
+    const region = safeText(client.region || client.city);
+    const stage = safeText(client.stage || client.status);
+    const grade = normalizeGrade(client.grade || client.level);
+    const lastContact = safeText(client.lastContactDate || client.lastContact || client.updatedAt);
+    const dueHtml = client.isDue ? `<span class="due-flag" title="${t("status.due")}">&#9888; <span class="due-badge">${t("status.due")}</span></span>` : "";
 
     tr.innerHTML = `
-      <td><strong>${d.company || "-"}</strong><br><span class="muted">${d.city || ""}</span></td>
-      <td>${d.country || "-"}</td>
-      <td>${d.contactName || "-"}<br><span class="muted">${d.role || ""}</span></td>
-      <td>${d.phone || "-"}</td>
-      <td>${d.email || "-"}</td>
-      <td>${d.brands || "-"}</td>
-      <td><span class="${tagClass(d.level)}">${d.level || "-"}</span></td>
-      <td><span class="${statusClass(d.status)}">${d.status || "-"}</span></td>
-      <td class="muted">${formatDate(d.updatedAt)}</td>
+      <td>${name || "-"} ${dueHtml}</td>
+      <td>${country || "-"}</td>
+      <td>${region || "-"}</td>
+      <td>${stage || "-"}</td>
+      <td>${grade || "-"}</td>
+      <td class="muted">${lastContact || "-"}</td>
+      <td><span class="${scoreClass(client.score)}">${client.score}</span></td>
       <td>
         <div class="row-actions">
-          <button class="btn ghost" data-action="wa" data-id="${d.id}">WhatsApp</button>
-          <button class="btn ghost" data-action="mail" data-id="${d.id}">Email</button>
-          <button class="btn ghost" data-action="edit" data-id="${d.id}">Edit</button>
-          <button class="btn danger" data-action="del" data-id="${d.id}">Delete</button>
+          <button class="btn ghost" data-action="wa" data-id="${client.id}">WhatsApp</button>
+          <button class="btn ghost" data-action="mail" data-id="${client.id}">Email</button>
+          <button class="btn ghost" data-action="edit" data-id="${client.id}">Edit</button>
+          <button class="btn danger" data-action="del" data-id="${client.id}">Delete</button>
         </div>
       </td>
     `;
@@ -384,15 +800,18 @@ function renderTable(data) {
 }
 
 function renderStats(data) {
-  el.totalCount.textContent = data.length;
+  if (el.totalCount) el.totalCount.textContent = data.length;
 }
 
 function render() {
-  const filtered = getFilteredData();
+  const safeAll = distributors.map(enrichClient);
+  const filtered = getFilteredData().map(enrichClient);
   const sorted = sortData(filtered);
 
-  renderFilters(distributors);
+  renderFilters(safeAll);
   renderStats(filtered);
+  renderTodayTop5(safeAll);
+  updateSortModeButton();
   renderTable(sorted);
 }
 
@@ -681,13 +1100,14 @@ async function exportWeeklyProgressExcel(options = {}) {
     const existingFile = options.existingFile || null;
 
     const clients = await getExportClients();
+    const enrichedClients = clients.map(enrichClient);
     const updatesById = getProgressUpdatesByClient(clients, {
       progressSource,
       manualMappingText,
     });
     if (window.excelExport && typeof window.excelExport.exportWeeklyWorkbook === "function") {
       await window.excelExport.exportWeeklyWorkbook({
-        clients,
+        clients: enrichedClients,
         updatesById,
         weekLabel,
         existingFile,
@@ -697,7 +1117,7 @@ async function exportWeeklyProgressExcel(options = {}) {
     }
 
     console.warn("[app] excelExport module missing; falling back to JSON export.");
-    const blob = new Blob([JSON.stringify(clients, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(enrichedClients, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -739,9 +1159,11 @@ function importJSON(file) {
       }
 
       // minimal validation
-      const cleaned = data.map(x => ({
+      const cleaned = data.map(x => ensureClientSafety({
+        ...(x || {}),
         id: x.id || uid(),
         company: safeText(x.company),
+        name: safeText(x.name || x.company),
         country: safeText(x.country),
         city: safeText(x.city),
         contactName: safeText(x.contactName),
@@ -751,8 +1173,13 @@ function importJSON(file) {
         website: safeText(x.website),
         brands: safeText(x.brands),
         interest: safeText(x.interest),
-        level: safeText(x.level),
-        status: safeText(x.status),
+        level: normalizeGrade(x.level || x.grade),
+        status: safeText(x.status || x.stage),
+        grade: normalizeGrade(x.grade || x.level),
+        stage: safeText(x.stage || x.status) || "New",
+        priority: safeText(x.priority) || "Normal",
+        lastContactDate: safeText(x.lastContactDate || x.lastContact || x.updatedAt) || todayDateISO(),
+        lastContact: safeText(x.lastContact || x.lastContactDate || x.updatedAt) || todayDateISO(),
         notes: safeText(x.notes),
         createdAt: x.createdAt || nowISO(),
         updatedAt: x.updatedAt || nowISO(),
@@ -779,31 +1206,56 @@ function clearAll() {
 // ---------------------------
 // Event Listeners
 // ---------------------------
+function handleSave(e) {
+  if (e && typeof e.preventDefault === "function") e.preventDefault();
+
+  const data = getFormData();
+  const err = validateData(data);
+  if (err) {
+    alert(err);
+    return;
+  }
+
+  if (currentEditId) {
+    updateDistributor(currentEditId, data);
+  } else {
+    createDistributor(data);
+  }
+
+  resetForm();
+  render();
+}
+
 if (el.form) {
-  el.form.addEventListener("submit", (e) => {
-    e.preventDefault();
+  el.form.addEventListener("submit", handleSave);
+}
 
-    const data = getFormData();
-    const err = validateData(data);
-    if (err) {
-      alert(err);
-      return;
-    }
+if (el.btnSave && !el.form) {
+  el.btnSave.addEventListener("click", handleSave);
+}
 
-    if (currentEditId) {
-      updateDistributor(currentEditId, data);
-    } else {
-      createDistributor(data);
-    }
-
+if (el.btnNew) {
+  el.btnNew.addEventListener("click", (e) => {
+    if (e && typeof e.preventDefault === "function") e.preventDefault();
     resetForm();
-    render();
   });
 }
 
 if (el.btnReset) {
   el.btnReset.addEventListener("click", () => {
     resetForm();
+  });
+}
+
+if (el.langSelect) {
+  el.langSelect.addEventListener("change", (e) => {
+    setLanguage(e.target ? e.target.value : "en", { persist: true, rerender: true });
+  });
+}
+
+if (el.btnSortMode) {
+  el.btnSortMode.addEventListener("click", () => {
+    toggleSortMode();
   });
 }
 
@@ -957,12 +1409,20 @@ if (el.btnQuickEmail && el.previewTitle && el.messagePreview) {
 // Init
 // ---------------------------
 function init() {
-  distributors = loadDB();
+  const initialLang = detectInitialLanguage();
+  setLanguage(initialLang, { persist: false, rerender: false });
+  if (el.langSelect) el.langSelect.value = currentLang;
+
+  const loaded = loadDB();
+  const normalizedResult = normalizeClientCollection(loaded);
+  distributors = normalizedResult.normalized;
+  if (normalizedResult.changed) saveDB();
   if (el.weekLabelInput && !safeText(el.weekLabelInput.value)) {
     el.weekLabelInput.value = getDefaultWeekLabel();
   }
+  updateSortModeButton();
   syncManualMappingVisibility();
-  if (el.search && el.filterCountry && el.filterLevel && el.filterStatus && el.tableBody && el.emptyState && el.totalCount) {
+  if (el.tableBody) {
     render();
   }
 }
