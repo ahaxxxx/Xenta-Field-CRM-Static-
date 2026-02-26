@@ -45,7 +45,7 @@ body{
 
 .layout{
   display:grid;
-  grid-template-columns: 22% 50% 28%;
+  grid-template-columns: 22% 78%;
   gap:14px;
   padding:14px;
   max-width: 1400px;
@@ -64,6 +64,14 @@ body{
   .panel-filters,
   .panel-details{
     overflow:visible;
+  }
+  .panel-details{
+    position: fixed;
+    right: 8px;
+    left: 8px;
+    top: 76px;
+    width: auto;
+    height: calc(100vh - 84px);
   }
 }
 
@@ -84,6 +92,60 @@ body{
 .panel-filters,
 .panel-details{
   overflow-y:auto;
+}
+
+.panel-details{
+  position: fixed;
+  right: 14px;
+  top: 94px;
+  width: min(560px, calc(100vw - 28px));
+  height: calc(100vh - 108px);
+  z-index: 40;
+  transform: translateX(24px);
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(17,24,49,.94), rgba(12,18,38,.92));
+  border: 1px solid rgba(255,255,255,.16);
+  box-shadow:
+    0 20px 48px rgba(0,0,0,.48),
+    0 0 0 1px rgba(122,162,255,.12) inset;
+  transition: transform .24s ease, opacity .24s ease;
+}
+
+.panel-details.open{
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.panel-details::before{
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(122,162,255,.10), rgba(102,227,166,.16), rgba(122,162,255,.10));
+  border-radius: 999px;
+}
+
+.details-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(4,8,20,.18);
+  z-index: 35;
+}
+
+body .topbar,
+body .layout,
+body .footer{
+  transition: filter .2s ease, opacity .2s ease;
+}
+
+body.details-open .topbar,
+body.details-open .layout,
+body.details-open .footer{
+  filter: none;
 }
 
 .panel-leads{

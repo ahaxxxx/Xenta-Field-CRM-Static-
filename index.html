@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -19,7 +19,7 @@
     <div class="top-actions">
       <select id="langSelect" class="select">
         <option value="en">EN</option>
-        <option value="zh">中文</option>
+        <option value="zh">&#20013;&#25991;</option>
       </select>
 
       <button id="btnExport" class="btn" data-i18n="actions.export">Export JSON</button>
@@ -192,8 +192,11 @@
     </section>
 
     <!-- RIGHT: Details + Message Generator -->
-    <section class="panel panel-details">
-      <div class="panel-title" data-i18n="details.title">Details</div>
+    <section id="detailsPanel" class="panel panel-details hidden">
+      <div class="panel-row">
+        <div class="panel-title" data-i18n="details.title">Details</div>
+        <button id="btnCloseDetails" class="btn ghost" type="button">Close</button>
+      </div>
 
       <div id="emptyState" class="empty">
         <div class="empty-big" data-i18n="details.emptyTitle">Select a record</div>
@@ -273,6 +276,11 @@
           <textarea id="fNotes" class="textarea" rows="5"></textarea>
         </div>
 
+        <div class="field">
+          <label>&#27807;&#36890;&#35760;&#24405; / Communication Log</label>
+          <textarea id="fCommunicationLog" class="textarea" rows="6" placeholder="[2026-02-26][WhatsApp] Followed up on product catalog"></textarea>
+        </div>
+
         <div class="grid2">
           <div class="field">
             <label data-i18n="details.last">Last contact</label>
@@ -305,10 +313,10 @@
             <label data-i18n="msg.lang">Language</label>
             <select id="mLang" class="select">
               <option value="en">English</option>
-              <option value="fr">Français</option>
-              <option value="es">Español</option>
-              <option value="ar">العربية</option>
-              <option value="zh">中文</option>
+              <option value="fr">Fran莽ais</option>
+              <option value="es">Espa帽ol</option>
+              <option value="ar">丕賱毓乇亘賷丞</option>
+              <option value="zh">涓枃</option>
             </select>
           </div>
         </div>
@@ -336,8 +344,10 @@
     </section>
   </main>
 
+  <div id="detailsBackdrop" class="details-backdrop hidden"></div>
+
   <footer class="footer">
-    <div>© <span id="year"></span> Xenta Field CRM (Static)</div>
+    <div>漏 <span id="year"></span> Xenta Field CRM (Static)</div>
     <div class="muted" data-i18n="footer.note">Local-only. No backend. Data stays in your browser.</div>
   </footer>
 
@@ -347,3 +357,4 @@
   <script src="app.js"></script>
 </body>
 </html>
+

@@ -81,6 +81,7 @@ const i18n = {
     "details.brands": "Brands / Competitors",
     "details.focus": "Product Focus",
     "details.notes": "Notes",
+    "details.communicationLog": "Communication Log",
     "details.last": "Last contact",
     "details.next": "Next step",
     "msg.title": "Message Generator",
@@ -327,6 +328,48 @@ function normalizeClientCollection(rawClients) {
   return { normalized, changed };
 }
 
+function parseCommunicationLog(raw) {
+  const text = safeText(raw);
+  if (!text) return [];
+
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.map((line) => {
+    let date = todayDateISO();
+    let type = "Note";
+    let detail = line;
+
+    const bracketMatch = line.match(/^\[([^\]]+)\](?:\s*\[([^\]]+)\])?\s*(.*)$/);
+    if (bracketMatch) {
+      const maybeDate = safeText(bracketMatch[1]);
+      const maybeType = safeText(bracketMatch[2]);
+      const maybeDetail = safeText(bracketMatch[3]);
+      if (maybeDate) date = maybeDate;
+      if (maybeType) type = maybeType;
+      if (maybeDetail) detail = maybeDetail;
+    }
+
+    return {
+      date,
+      type,
+      detail,
+    };
+  });
+}
+
+function historyToCommunicationLog(history) {
+  const list = Array.isArray(history) ? history : [];
+  return list
+    .map((h) => {
+      const date = safeText(h?.date || h?.timestamp || h?.createdAt || h?.updatedAt) || todayDateISO();
+      const type = safeText(h?.type || h?.action || h?.event || "Note");
+      const detail = safeText(h?.detail || h?.note || h?.notes || h?.description);
+      if (!detail) return "";
+      return `[${date}][${type}] ${detail}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
 function xmlEscape(value) {
   return safeText(value)
     .replace(/&/g, "&amp;")
@@ -347,6 +390,44 @@ function loadDB() {
     return JSON.parse(raw);
   } catch {
     return [];
+  }
+}
+
+async function loadInitialClients() {
+  const local = loadDB();
+  const localNormalized = normalizeClientCollection(local).normalized;
+
+  if (!(window.dataAdapter && typeof window.dataAdapter.getAllClients === "function")) {
+    return localNormalized;
+  }
+
+  try {
+    const adapterClients = await window.dataAdapter.getAllClients();
+    const adapterList = Array.isArray(adapterClients) ? adapterClients : [];
+    const adapterNormalized = normalizeClientCollection(adapterList).normalized;
+
+    if (!adapterNormalized.length) {
+      return localNormalized;
+    }
+
+    const mergedById = new Map();
+    const merged = [];
+    const pushIfNew = (item) => {
+      if (!item || typeof item !== "object") return;
+      const id = safeText(item.id);
+      if (id) {
+        if (mergedById.has(id)) return;
+        mergedById.set(id, true);
+      }
+      merged.push(item);
+    };
+
+    adapterNormalized.forEach(pushIfNew);
+    localNormalized.forEach(pushIfNew);
+    return merged;
+  } catch (err) {
+    console.warn("[app] Failed to read clients from dataAdapter during init; using localStorage only.", err);
+    return localNormalized;
   }
 }
 
@@ -455,6 +536,9 @@ function pickEl(...selectors) {
 const el = {
   form: pickEl("#distributorForm"),
   detailForm: pickEl("#detailForm"),
+  detailsPanel: pickEl("#detailsPanel"),
+  detailsBackdrop: pickEl("#detailsBackdrop"),
+  btnCloseDetails: pickEl("#btnCloseDetails"),
   company: pickEl("#company", "#fName"),
   country: pickEl("#country", "#fCountry"),
   city: pickEl("#city"),
@@ -468,8 +552,10 @@ const el = {
   level: pickEl("#level", "#fGrade"),
   status: pickEl("#status", "#fStage"),
   notes: pickEl("#notes", "#fNotes"),
+  communicationLog: pickEl("#fCommunicationLog"),
   priority: pickEl("#priority", "#fPriority"),
   lastContactDate: pickEl("#lastContactDate", "#fLastContact"),
+  nextStep: pickEl("#fNextStep"),
 
   btnSave: pickEl("#btnSave"),
   btnReset: pickEl("#btnReset"),
@@ -511,6 +597,28 @@ const el = {
   previewTitle: pickEl("#previewTitle"),
 };
 
+function openDetailsPanel() {
+  if (el.detailsPanel) {
+    el.detailsPanel.classList.remove("hidden");
+    el.detailsPanel.classList.add("open");
+  }
+  if (el.detailsBackdrop) {
+    el.detailsBackdrop.classList.remove("hidden");
+  }
+  document.body.classList.add("details-open");
+}
+
+function closeDetailsPanel() {
+  if (el.detailsPanel) {
+    el.detailsPanel.classList.remove("open");
+    el.detailsPanel.classList.add("hidden");
+  }
+  if (el.detailsBackdrop) {
+    el.detailsBackdrop.classList.add("hidden");
+  }
+  document.body.classList.remove("details-open");
+}
+
 // ---------------------------
 // CRUD
 // ---------------------------
@@ -520,6 +628,7 @@ function getFormData() {
   const stageValue = safeText(el.status ? el.status.value : "") || "New";
   const lastContactDateValue = safeText(el.lastContactDate ? el.lastContactDate.value : "") || todayDateISO();
   const priorityValue = safeText(el.priority ? el.priority.value : "") || "Normal";
+  const communicationLogValue = safeText(el.communicationLog ? el.communicationLog.value : "");
 
   return {
     company: companyOrName,
@@ -541,13 +650,17 @@ function getFormData() {
     lastContactDate: lastContactDateValue,
     lastContact: lastContactDateValue,
     notes: safeText(el.notes ? el.notes.value : ""),
+    nextStep: safeText(el.nextStep ? el.nextStep.value : ""),
+    nextAction: safeText(el.nextStep ? el.nextStep.value : ""),
+    communicationLog: communicationLogValue,
+    history: communicationLogValue ? parseCommunicationLog(communicationLogValue) : null,
   };
 }
 
 function resetForm() {
   const fields = [
     "company", "country", "city", "contactName", "role", "phone",
-    "email", "website", "brands", "interest", "level", "status", "notes", "priority", "lastContactDate"
+    "email", "website", "brands", "interest", "level", "status", "notes", "priority", "lastContactDate", "nextStep", "communicationLog"
   ];
   currentEditId = null;
   if (el.form) el.form.reset();
@@ -561,6 +674,7 @@ function resetForm() {
   if (el.detailForm) el.detailForm.classList.remove("hidden");
   if (el.emptyState) el.emptyState.classList.add("hidden");
   if (el.btnSave) el.btnSave.textContent = "Save Distributor";
+  openDetailsPanel();
 }
 
 function validateData(d) {
@@ -570,9 +684,11 @@ function validateData(d) {
 }
 
 function createDistributor(d) {
+  const history = Array.isArray(d.history) ? d.history : [];
   const item = ensureClientSafety({
     id: uid(),
     ...d,
+    history,
     createdAt: nowISO(),
     updatedAt: nowISO(),
   });
@@ -584,9 +700,15 @@ function updateDistributor(id, d) {
   const idx = distributors.findIndex(x => x.id === id);
   if (idx === -1) return;
 
+  const existing = distributors[idx] || {};
+  const history = Array.isArray(d.history)
+    ? d.history
+    : (Array.isArray(existing.history) ? existing.history : []);
+
   distributors[idx] = ensureClientSafety({
-    ...distributors[idx],
+    ...existing,
     ...d,
+    history,
     updatedAt: nowISO(),
   });
   saveDB();
@@ -617,11 +739,16 @@ function editDistributor(id) {
   if (el.priority) el.priority.value = safeText(d.priority || "Normal");
   if (el.lastContactDate) el.lastContactDate.value = safeText(d.lastContactDate || d.lastContact || todayDateISO());
   if (el.notes) el.notes.value = d.notes || "";
+  if (el.nextStep) el.nextStep.value = safeText(d.nextStep || d.nextAction);
+  if (el.communicationLog) {
+    const savedLog = safeText(d.communicationLog);
+    el.communicationLog.value = savedLog || historyToCommunicationLog(d.history);
+  }
   if (el.detailForm) el.detailForm.classList.remove("hidden");
   if (el.emptyState) el.emptyState.classList.add("hidden");
 
   if (el.btnSave) el.btnSave.textContent = "Update Distributor";
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  openDetailsPanel();
 }
 
 // ---------------------------
@@ -648,7 +775,9 @@ function getFilteredData() {
     const text = [
       clientSafe.name, clientSafe.company, clientSafe.country, clientSafe.city, clientSafe.region, clientSafe.contactName, clientSafe.role,
       clientSafe.phone, clientSafe.email, clientSafe.website, clientSafe.brands, clientSafe.interest, clientSafe.priority,
-      clientSafe.grade, clientSafe.level, clientSafe.stage, clientSafe.status, clientSafe.notes
+      clientSafe.grade, clientSafe.level, clientSafe.stage, clientSafe.status, clientSafe.notes,
+      clientSafe.nextStep, clientSafe.nextAction, clientSafe.communicationLog,
+      ...(Array.isArray(clientSafe.history) ? clientSafe.history.map((h) => safeText(h && (h.detail || h.note || h.notes || h.description))) : [])
     ].join(" ").toLowerCase();
 
     const matchQ = !q || text.includes(q);
@@ -769,6 +898,7 @@ function renderTable(data) {
 
   data.forEach(client => {
     const tr = document.createElement("tr");
+    tr.dataset.id = client.id;
     const name = safeText(client.name || client.company);
     const country = safeText(client.country);
     const region = safeText(client.region || client.city);
@@ -918,7 +1048,7 @@ function syncManualMappingVisibility() {
 }
 
 function parseWeekDate(label) {
-  const m = safeText(label).match(/^Week\s+(\d{4}-\d{2}-\d{2})$/i);
+  const m = safeText(label).match(/^(?:Week|周)\s+(\d{4}-\d{2}-\d{2})$/i);
   if (!m) return null;
   const d = new Date(`${m[1]}T00:00:00Z`);
   if (!Number.isFinite(d.getTime())) return null;
@@ -962,10 +1092,10 @@ async function readUploadedClientsHistory(file) {
     if (!rows.length) return null;
 
     const headers = rows[0].map((h) => safeText(h));
-    const idIdx = headers.indexOf("Client ID");
+    const idIdx = headers.findIndex((h) => h === "Client ID" || h === "客户ID");
     if (idIdx === -1) return null;
 
-    const weeklyColumns = headers.filter((h) => h.startsWith("Week "));
+    const weeklyColumns = headers.filter((h) => /^Week\s+/i.test(h) || /^周\s*/.test(h) || /^第.*周$/.test(h));
     const rowsById = new Map();
 
     rows.slice(1).forEach((r) => {
@@ -1033,11 +1163,10 @@ function buildWeeklySummaryText(options) {
       const c = crmById.get(id) || {};
       const name = safeText(
         (crmById.has(id) ? getClientName(c) : "") ||
-        row["Client Name"] ||
-        row["Organization"] ||
+        pickField(row, ["Client Name", "客户名称", "Organization", "机构名称"]) ||
         id
       );
-      const country = safeText((crmById.has(id) ? getClientCountry(c) : "") || row["Country"] || "-");
+      const country = safeText((crmById.has(id) ? getClientCountry(c) : "") || pickField(row, ["Country", "国家"]) || "-");
       stuckLines.push(`- ${name} (${country})`);
     });
     stuckLines.sort((a, b) => a.localeCompare(b));
@@ -1181,6 +1310,10 @@ function importJSON(file) {
         lastContactDate: safeText(x.lastContactDate || x.lastContact || x.updatedAt) || todayDateISO(),
         lastContact: safeText(x.lastContact || x.lastContactDate || x.updatedAt) || todayDateISO(),
         notes: safeText(x.notes),
+        nextStep: safeText(x.nextStep || x.nextAction || x.next_step || x.plan),
+        nextAction: safeText(x.nextAction || x.nextStep || x.next_step || x.plan),
+        communicationLog: safeText(x.communicationLog),
+        history: Array.isArray(x.history) ? x.history : parseCommunicationLog(x.communicationLog),
         createdAt: x.createdAt || nowISO(),
         updatedAt: x.updatedAt || nowISO(),
       }));
@@ -1224,6 +1357,7 @@ function handleSave(e) {
 
   resetForm();
   render();
+  closeDetailsPanel();
 }
 
 if (el.form) {
@@ -1246,6 +1380,22 @@ if (el.btnReset) {
     resetForm();
   });
 }
+
+if (el.btnCloseDetails) {
+  el.btnCloseDetails.addEventListener("click", () => {
+    closeDetailsPanel();
+  });
+}
+
+if (el.detailsBackdrop) {
+  el.detailsBackdrop.addEventListener("click", () => {
+    closeDetailsPanel();
+  });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDetailsPanel();
+});
 
 if (el.langSelect) {
   el.langSelect.addEventListener("change", (e) => {
@@ -1339,7 +1489,12 @@ if (el.btnClearAll) el.btnClearAll.addEventListener("click", clearAll);
 if (el.tableBody) {
   el.tableBody.addEventListener("click", (e) => {
     const btn = e.target.closest("button");
-    if (!btn) return;
+    if (!btn) {
+      const row = e.target.closest("tr[data-id]");
+      if (!row) return;
+      editDistributor(row.dataset.id);
+      return;
+    }
 
     const action = btn.dataset.action;
     const id = btn.dataset.id;
@@ -1408,18 +1563,19 @@ if (el.btnQuickEmail && el.previewTitle && el.messagePreview) {
 // ---------------------------
 // Init
 // ---------------------------
-function init() {
+async function init() {
   const initialLang = detectInitialLanguage();
   setLanguage(initialLang, { persist: false, rerender: false });
   if (el.langSelect) el.langSelect.value = currentLang;
 
-  const loaded = loadDB();
+  const loaded = await loadInitialClients();
   const normalizedResult = normalizeClientCollection(loaded);
   distributors = normalizedResult.normalized;
-  if (normalizedResult.changed) saveDB();
+  saveDB();
   if (el.weekLabelInput && !safeText(el.weekLabelInput.value)) {
     el.weekLabelInput.value = getDefaultWeekLabel();
   }
+  closeDetailsPanel();
   updateSortModeButton();
   syncManualMappingVisibility();
   if (el.tableBody) {
@@ -1428,3 +1584,11 @@ function init() {
 }
 
 init();
+  const pickField = (row, keys) => {
+    if (!row || typeof row !== "object") return "";
+    for (const key of keys) {
+      const value = safeText(row[key]);
+      if (value) return value;
+    }
+    return "";
+  };

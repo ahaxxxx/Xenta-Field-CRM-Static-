@@ -1,34 +1,34 @@
 (function () {
   const REPORT_COLUMNS = [
-    "Country",
-    "Client Name",
-    "Stage",
-    "Current Progress",
-    "Problems",
-    "Next Action",
-    "Follow-up Score",
-    "Is Due",
+    "\u56fd\u5bb6",
+    "\u5ba2\u6237\u540d\u79f0",
+    "\u9636\u6bb5",
+    "\u672c\u5468\u8fdb\u5c55",
+    "\u95ee\u9898\u4e0e\u98ce\u9669",
+    "\u4e0b\u4e00\u6b65\u52a8\u4f5c",
+    "\u8ddf\u8fdb\u8bc4\u5206",
+    "\u662f\u5426\u5230\u671f",
   ];
   const TIMELINE_COLUMNS = [
-    "Client ID",
-    "Client Name",
-    "Country",
-    "Date",
-    "Type",
-    "Detail",
-    "Stage After Change",
-    "Days Since Previous Interaction",
+    "\u5ba2\u6237ID",
+    "\u5ba2\u6237\u540d\u79f0",
+    "\u56fd\u5bb6",
+    "\u65e5\u671f",
+    "\u6c9f\u901a\u65b9\u5f0f",
+    "\u6c9f\u901a\u5185\u5bb9",
+    "\u9636\u6bb5\uff08\u53d8\u66f4\u540e\uff09",
+    "\u8ddd\u4e0a\u6b21\u6c9f\u901a\u5929\u6570",
   ];
   const SUMMARY_COLUMNS = [
-    "Client ID",
-    "Client Name",
-    "Country",
-    "First Contact Date",
-    "Last Contact Date",
-    "Total Interactions",
-    "Days Active",
-    "Current Stage",
-    "Average Gap Days",
+    "\u5ba2\u6237ID",
+    "\u5ba2\u6237\u540d\u79f0",
+    "\u56fd\u5bb6",
+    "\u9996\u6b21\u6c9f\u901a\u65e5\u671f",
+    "\u6700\u540e\u6c9f\u901a\u65e5\u671f",
+    "\u603b\u6c9f\u901a\u6b21\u6570",
+    "\u8ddf\u8fdb\u5468\u671f\uff08\u5929\uff09",
+    "\u5f53\u524d\u9636\u6bb5",
+    "\u5e73\u5747\u95f4\u9694\uff08\u5929\uff09",
   ];
   const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -108,7 +108,7 @@
       problems: safeText(c.problems || c.problem || c.blockers || c.risks),
       nextAction: safeText(c.nextAction || c.next_step || c.plan || c.nextStep),
       followUpScore: safeText(c.followUpScore || c.score),
-      isDue: c.isDue ? "Yes" : "No",
+      isDue: c.isDue ? "\u662f" : "\u5426",
     };
   }
 
@@ -309,9 +309,9 @@
     applyHeaderStyle(wsLifecycle);
 
     const wb = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(wb, wsWeekly, "Weekly_Report");
-    window.XLSX.utils.book_append_sheet(wb, wsTimeline, "Full_Interaction_Timeline");
-    window.XLSX.utils.book_append_sheet(wb, wsLifecycle, "Client_Lifecycle_Summary");
+    window.XLSX.utils.book_append_sheet(wb, wsWeekly, "\u5468\u8fdb\u5c55\u62a5\u544a");
+    window.XLSX.utils.book_append_sheet(wb, wsTimeline, "\u5b8c\u6574\u6c9f\u901a\u65f6\u95f4\u7ebf");
+    window.XLSX.utils.book_append_sheet(wb, wsLifecycle, "\u5ba2\u6237\u751f\u547d\u5468\u671f\u6458\u8981");
     window.XLSX.writeFile(wb, `Weekly_Client_Progress_${sanitizeFilenameToken(weekLabel)}.xlsx`);
 
     return {
