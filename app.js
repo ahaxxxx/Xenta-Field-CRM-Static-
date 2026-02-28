@@ -1,11 +1,27 @@
 /**************************************/
 
-const DB_KEY = "xenta_crm_distributors_v1";
+const STORAGE_KEY = "xenta_field_crm_v1";
+const SYSTEM_VERSION = "2.0.0";
+const LEGACY_STORAGE_KEYS = [
+  "xentaCRM",
+  "crmData",
+  "clients",
+  "xenta_crm_distributors_v1",
+  "xenta_crm_distributors_v1_backup",
+  "crm_data_old",
+  "crm_clients",
+  "leads",
+  "distributors",
+];
+const BACKUP_PREFIX = "xenta_field_crm_backup_";
+const MAX_BACKUPS = 5;
+const DB_KEY = STORAGE_KEY;
 const LANG_KEY = "xenta_crm_lang";
 
 let distributors = [];
 let currentEditId = null;
 let currentLang = "en";
+let lastLoadedStorageKey = "";
 
 let sortState = { key: "score", direction: "desc" };
 let sortMode = "score";
@@ -32,6 +48,25 @@ const stageWeightMap = {
   quoted: 6,
   contract: 8,
   closed: 0,
+};
+
+const companyLevelScoreMap = {
+  Unknown: 0,
+  Tier1: 10,
+  Tier2: 7,
+  Tier3: 4,
+};
+
+const positionCategoryScoreMap = {
+  Unknown: 0,
+  Owner: 10,
+  CEO: 9,
+  Director: 8,
+  Manager: 6,
+  Sales: 5,
+  Procurement: 5,
+  Technical: 4,
+  Other: 3,
 };
 
 const i18n = {
@@ -249,6 +284,26 @@ function normalizeGrade(rawGrade) {
   return followUpDays[g] ? g : "C";
 }
 
+function normalizeCompanyLevel(rawLevel) {
+  const value = safeText(rawLevel) || "Unknown";
+  return Object.prototype.hasOwnProperty.call(companyLevelScoreMap, value) ? value : "Unknown";
+}
+
+function normalizePositionCategory(rawCategory) {
+  const value = safeText(rawCategory) || "Unknown";
+  return Object.prototype.hasOwnProperty.call(positionCategoryScoreMap, value) ? value : "Other";
+}
+
+function scoreFromCompanyLevel(level) {
+  const safeLevel = normalizeCompanyLevel(level);
+  return companyLevelScoreMap[safeLevel] ?? 0;
+}
+
+function scoreFromPositionCategory(category) {
+  const safeCategory = normalizePositionCategory(category);
+  return positionCategoryScoreMap[safeCategory] ?? 0;
+}
+
 function ensureClientSafety(rawClient) {
   const client = { ...(rawClient || {}) };
   const safeGrade = normalizeGrade(client.grade || client.level);
@@ -258,7 +313,23 @@ function ensureClientSafety(rawClient) {
     client.lastContactDate || client.lastContact || client.updatedAt || client.updated_at
   ) || todayDateISO();
 
-  client.name = safeText(client.name || client.company);
+  client.company = safeText(client.company);
+  client.name = safeText(client.name || client.contactName || client.company);
+  client.contactName = safeText(client.contactName || client.name);
+  client.companyLevel = normalizeCompanyLevel(client.companyLevel);
+  client.companyScore = Number(client.companyScore);
+  if (!Number.isFinite(client.companyScore)) client.companyScore = scoreFromCompanyLevel(client.companyLevel);
+  client.positionCategory = normalizePositionCategory(client.positionCategory || client.role);
+  client.positionCustom = safeText(client.positionCustom || (client.positionCategory === "Other" ? client.role : ""));
+  client.positionScore = Number(client.positionScore);
+  if (!Number.isFinite(client.positionScore)) client.positionScore = scoreFromPositionCategory(client.positionCategory);
+  if (Array.isArray(client.productFocus)) {
+    client.productFocus = client.productFocus.map((v) => safeText(v)).filter(Boolean);
+  } else {
+    client.productFocus = safeText(client.interest).split(",").map((v) => safeText(v)).filter(Boolean);
+  }
+  client.interest = safeText(client.interest || client.productFocus.join(", "));
+  client.history = Array.isArray(client.history) ? client.history : [];
   client.priority = safePriority;
   client.grade = safeGrade;
   client.stage = safeStage;
@@ -288,8 +359,10 @@ function calculateFollowUpScore(rawClient) {
   const gradeWeight = gradeWeightMap[client.grade] || gradeWeightMap.C;
   const stageWeight = stageWeightMap[safeText(client.stage).toLowerCase()] ?? 0;
   const priorityBonus = safeText(client.priority).toLowerCase() === "high" ? 5 : 0;
+  const companyBonus = Number(client.companyScore) || 0;
+  const positionBonus = Number(client.positionScore) || 0;
 
-  const score = (daysSinceLastContact * gradeWeight) + stageWeight + priorityBonus;
+  const score = (daysSinceLastContact * gradeWeight) + stageWeight + priorityBonus + companyBonus + positionBonus;
   return Math.round(score);
 }
 
@@ -312,9 +385,20 @@ function normalizeClientCollection(rawClients) {
   const list = Array.isArray(rawClients) ? rawClients : [];
   let changed = false;
   const normalized = list.map((raw) => {
-    const before = raw || {};
+    const beforeRaw = raw || {};
+    const before = {
+      ...beforeRaw,
+      company: safeText(beforeRaw.company),
+      history: Array.isArray(beforeRaw.history) ? beforeRaw.history : [],
+      grade: safeText(beforeRaw.grade || beforeRaw.level) || "C",
+      stage: safeText(beforeRaw.stage || beforeRaw.status) || "New",
+    };
     const after = ensureClientSafety(before);
     if (
+      safeText(beforeRaw.company) !== safeText(before.company) ||
+      (Array.isArray(beforeRaw.history) ? beforeRaw.history.length : -1) !== before.history.length ||
+      safeText(beforeRaw.grade || beforeRaw.level) !== safeText(before.grade) ||
+      safeText(beforeRaw.stage || beforeRaw.status) !== safeText(before.stage) ||
       safeText(before.priority) !== safeText(after.priority) ||
       safeText(before.grade) !== safeText(after.grade) ||
       safeText(before.stage) !== safeText(after.stage) ||
@@ -379,18 +463,211 @@ function xmlEscape(value) {
     .replace(/'/g, "&apos;");
 }
 
+function safeParseJSON(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
+function isValidDataEnvelope(data) {
+  return !!(data && typeof data === "object" && Array.isArray(data.clients));
+}
+
+function coerceClientsFromAnyShape(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return null;
+  if (Array.isArray(payload.clients)) return payload.clients;
+  if (Array.isArray(payload.distributors)) return payload.distributors;
+  if (Array.isArray(payload.leads)) return payload.leads;
+  return null;
+}
+
+function applyClientCompatibilityDefaults(rawClient) {
+  const client = { ...(rawClient || {}) };
+  if (typeof client.company !== "string") client.company = safeText(client.company);
+  if (!Array.isArray(client.history)) client.history = [];
+  if (!safeText(client.grade)) client.grade = "C";
+  if (!safeText(client.stage)) client.stage = "New";
+  return client;
+}
+
+function migrateToEnvelope(payload) {
+  const sourceClients = coerceClientsFromAnyShape(payload);
+  if (!Array.isArray(sourceClients)) return null;
+  const compatibleClients = sourceClients.map((c) => applyClientCompatibilityDefaults(c));
+  return {
+    version: safeText(payload?.version) || SYSTEM_VERSION,
+    lastUpdated: Number(payload?.lastUpdated) || Date.now(),
+    clients: compatibleClients,
+  };
+}
+
+function listBackupKeysNewestFirst() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith(BACKUP_PREFIX)) keys.push(key);
+  }
+  keys.sort((a, b) => {
+    const ta = Number(a.slice(BACKUP_PREFIX.length)) || 0;
+    const tb = Number(b.slice(BACKUP_PREFIX.length)) || 0;
+    return tb - ta;
+  });
+  return keys;
+}
+
+function pruneBackups() {
+  const keys = listBackupKeysNewestFirst();
+  const stale = keys.slice(MAX_BACKUPS);
+  stale.forEach((key) => localStorage.removeItem(key));
+}
+
+function saveBackupFromEnvelope(envelope, reason = "snapshot") {
+  if (!isValidDataEnvelope(envelope)) return;
+  const backupEnvelope = {
+    ...envelope,
+    backupReason: reason,
+    backupAt: Date.now(),
+  };
+  localStorage.setItem(`${BACKUP_PREFIX}${Date.now()}`, JSON.stringify(backupEnvelope));
+  pruneBackups();
+}
+
+function backupCurrentStorage(reason = "before-save") {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return;
+  const parsed = safeParseJSON(raw);
+  const envelope = migrateToEnvelope(parsed);
+  if (!isValidDataEnvelope(envelope)) return;
+  saveBackupFromEnvelope(envelope, reason);
+}
+
+function restoreLatestBackup() {
+  const latestKey = listBackupKeysNewestFirst()[0];
+  if (!latestKey) return null;
+  const raw = localStorage.getItem(latestKey);
+  if (!raw) return null;
+  const parsed = safeParseJSON(raw);
+  const envelope = migrateToEnvelope(parsed);
+  if (!isValidDataEnvelope(envelope)) return null;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
+  console.warn(`[storage] Restored latest backup: ${latestKey}`);
+  return envelope;
+}
+
+function loadData() {
+  try {
+    const candidateKeys = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS];
+    const availableKeys = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k) availableKeys.push(k);
+    }
+    console.info("[app] localStorage keys:", availableKeys.join(", "));
+
+    for (const key of candidateKeys) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = safeParseJSON(raw);
+      const envelope = migrateToEnvelope(parsed);
+      if (!isValidDataEnvelope(envelope)) {
+        if (key === STORAGE_KEY) {
+          console.error("Data corrupted, restoring backup...");
+          const restored = restoreLatestBackup();
+          if (isValidDataEnvelope(restored)) {
+            return { sourceKey: STORAGE_KEY, data: restored };
+          }
+        }
+        continue;
+      }
+
+      if (key !== STORAGE_KEY) {
+        saveBackupFromEnvelope(envelope, `migrate-from-${key}`);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          version: SYSTEM_VERSION,
+          lastUpdated: Date.now(),
+          clients: envelope.clients,
+        }));
+        console.info(`[storage] Migrated data from legacy key "${key}" to "${STORAGE_KEY}".`);
+      }
+      console.info("[storage] Sample client after load/migration:", envelope.clients[0] || null);
+
+      return {
+        sourceKey: key,
+        data: {
+          version: SYSTEM_VERSION,
+          lastUpdated: Number(envelope.lastUpdated) || Date.now(),
+          clients: envelope.clients,
+        },
+      };
+    }
+
+    return {
+      sourceKey: "",
+      data: {
+        version: SYSTEM_VERSION,
+        lastUpdated: Date.now(),
+        clients: [],
+      },
+    };
+  } catch (error) {
+    console.error("Data corrupted, restoring backup...", error);
+    const restored = restoreLatestBackup();
+    if (isValidDataEnvelope(restored)) {
+      return { sourceKey: STORAGE_KEY, data: restored };
+    }
+    return {
+      sourceKey: "",
+      data: {
+        version: SYSTEM_VERSION,
+        lastUpdated: Date.now(),
+        clients: [],
+      },
+    };
+  }
+}
+
+function saveData(clients) {
+  const nextEnvelope = {
+    version: SYSTEM_VERSION,
+    lastUpdated: Date.now(),
+    clients: Array.isArray(clients) ? clients : [],
+  };
+  if (!isValidDataEnvelope(nextEnvelope)) {
+    throw new Error("Refuse to save invalid payload: clients[] missing.");
+  }
+
+  try {
+    backupCurrentStorage("before-save");
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextEnvelope));
+
+    const verifyParsed = safeParseJSON(localStorage.getItem(STORAGE_KEY) || "");
+    const verifyEnvelope = migrateToEnvelope(verifyParsed);
+    const lengthMatches = Array.isArray(verifyEnvelope?.clients) && verifyEnvelope.clients.length === nextEnvelope.clients.length;
+    if (!isValidDataEnvelope(verifyEnvelope) || !lengthMatches) {
+      console.error("[storage] Save verification failed, restoring backup.");
+      restoreLatestBackup();
+      throw new Error("Save verification failed.");
+    }
+    return true;
+  } catch (error) {
+    console.error("[storage] Save failed, restoring backup.", error);
+    restoreLatestBackup();
+    throw error;
+  }
+}
+
 function saveDB() {
-  localStorage.setItem(DB_KEY, JSON.stringify(distributors));
+  saveData(distributors);
 }
 
 function loadDB() {
-  const raw = localStorage.getItem(DB_KEY);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  const loaded = loadData();
+  lastLoadedStorageKey = loaded.sourceKey || "";
+  const envelope = loaded.data;
+  return Array.isArray(envelope?.clients) ? envelope.clients : [];
 }
 
 async function loadInitialClients() {
@@ -539,11 +816,19 @@ const el = {
   detailsPanel: pickEl("#detailsPanel"),
   detailsBackdrop: pickEl("#detailsBackdrop"),
   btnCloseDetails: pickEl("#btnCloseDetails"),
-  company: pickEl("#company", "#fName"),
+  company: pickEl("#company", "#fCompany", "#fName"),
   country: pickEl("#country", "#fCountry"),
   city: pickEl("#city"),
-  contactName: pickEl("#contactName"),
-  role: pickEl("#role"),
+  contactName: pickEl("#contactName", "#fContactName"),
+  role: pickEl("#role", "#fPositionCustom"),
+  companyLevel: pickEl("#fCompanyLevel"),
+  companyScore: pickEl("#fCompanyScore"),
+  positionCategory: pickEl("#fPositionCategory"),
+  positionCustom: pickEl("#fPositionCustom"),
+  positionCustomWrap: pickEl("#positionCustomWrap"),
+  positionScore: pickEl("#fPositionScore"),
+  productFocusOtherToggle: pickEl("#fProductFocusOtherToggle"),
+  productFocusOtherText: pickEl("#fProductFocusOtherText"),
   phone: pickEl("#phone", "#fWhatsapp"),
   email: pickEl("#email", "#fEmail"),
   website: pickEl("#website", "#fLinkedIn"),
@@ -619,29 +904,92 @@ function closeDetailsPanel() {
   document.body.classList.remove("details-open");
 }
 
+function getSelectedProductFocus() {
+  const checked = Array.from(document.querySelectorAll('input[name="fProductFocus"]:checked'))
+    .map((node) => safeText(node.value))
+    .filter(Boolean);
+  const otherText = safeText(el.productFocusOtherText ? el.productFocusOtherText.value : "");
+  const hasOther = checked.includes("Other");
+  if (hasOther && otherText) checked.push(otherText);
+  return [...new Set(checked)];
+}
+
+function setSelectedProductFocus(values) {
+  const list = Array.isArray(values)
+    ? values.map((v) => safeText(v)).filter(Boolean)
+    : safeText(values).split(",").map((v) => safeText(v)).filter(Boolean);
+  const known = new Set(["CLIA POCT", "FIA", "LFA", "PCR", "Rapid test", "Other"]);
+  const knownSelected = new Set(list.filter((v) => known.has(v)));
+  const customValues = list.filter((v) => !known.has(v));
+
+  document.querySelectorAll('input[name="fProductFocus"]').forEach((node) => {
+    node.checked = knownSelected.has(safeText(node.value));
+  });
+  if (customValues.length) {
+    if (el.productFocusOtherToggle) el.productFocusOtherToggle.checked = true;
+    if (el.productFocusOtherText) el.productFocusOtherText.value = customValues.join(", ");
+  } else if (el.productFocusOtherText) {
+    el.productFocusOtherText.value = "";
+  }
+  toggleProductFocusOtherInput();
+}
+
+function toggleProductFocusOtherInput() {
+  if (!el.productFocusOtherText) return;
+  const show = !!(el.productFocusOtherToggle && el.productFocusOtherToggle.checked);
+  el.productFocusOtherText.classList.toggle("hidden", !show);
+  if (!show) el.productFocusOtherText.value = "";
+}
+
+function syncCompanyScoreUI() {
+  if (!el.companyScore) return;
+  const score = scoreFromCompanyLevel(el.companyLevel ? el.companyLevel.value : "Unknown");
+  el.companyScore.value = String(score);
+}
+
+function syncPositionUI() {
+  const category = normalizePositionCategory(el.positionCategory ? el.positionCategory.value : "Unknown");
+  const showCustom = category === "Other";
+  if (el.positionCustomWrap) el.positionCustomWrap.classList.toggle("hidden", !showCustom);
+  if (el.positionScore) el.positionScore.value = String(scoreFromPositionCategory(category));
+}
+
 // ---------------------------
 // CRUD
 // ---------------------------
 function getFormData() {
-  const companyOrName = safeText(el.company ? el.company.value : "");
+  const companyValue = safeText(el.company ? el.company.value : "");
+  const contactValue = safeText(el.contactName ? el.contactName.value : "");
   const gradeValue = normalizeGrade(el.level ? el.level.value : "");
   const stageValue = safeText(el.status ? el.status.value : "") || "New";
   const lastContactDateValue = safeText(el.lastContactDate ? el.lastContactDate.value : "") || todayDateISO();
   const priorityValue = safeText(el.priority ? el.priority.value : "") || "Normal";
   const communicationLogValue = safeText(el.communicationLog ? el.communicationLog.value : "");
+  const companyLevel = normalizeCompanyLevel(el.companyLevel ? el.companyLevel.value : "Unknown");
+  const positionCategory = normalizePositionCategory(el.positionCategory ? el.positionCategory.value : "Unknown");
+  const positionCustom = safeText(el.positionCustom ? el.positionCustom.value : "");
+  const positionScoreRaw = Number(el.positionScore ? el.positionScore.value : NaN);
+  const positionScore = Number.isFinite(positionScoreRaw) ? positionScoreRaw : scoreFromPositionCategory(positionCategory);
+  const productFocus = getSelectedProductFocus();
 
   return {
-    company: companyOrName,
-    name: companyOrName,
+    company: companyValue,
+    name: contactValue || companyValue,
     country: safeText(el.country ? el.country.value : ""),
     city: safeText(el.city ? el.city.value : ""),
-    contactName: safeText(el.contactName ? el.contactName.value : ""),
-    role: safeText(el.role ? el.role.value : ""),
+    contactName: contactValue,
+    role: positionCustom || positionCategory,
+    positionCategory,
+    positionCustom,
+    positionScore,
+    companyLevel,
+    companyScore: scoreFromCompanyLevel(companyLevel),
+    productFocus,
     phone: safeText(el.phone ? el.phone.value : ""),
     email: safeText(el.email ? el.email.value : ""),
     website: safeText(el.website ? el.website.value : ""),
     brands: safeText(el.brands ? el.brands.value : ""),
-    interest: safeText(el.interest ? el.interest.value : ""),
+    interest: productFocus.join(", "),
     level: gradeValue,
     status: stageValue,
     grade: gradeValue,
@@ -660,7 +1008,8 @@ function getFormData() {
 function resetForm() {
   const fields = [
     "company", "country", "city", "contactName", "role", "phone",
-    "email", "website", "brands", "interest", "level", "status", "notes", "priority", "lastContactDate", "nextStep", "communicationLog"
+    "email", "website", "brands", "interest", "level", "status", "notes", "priority", "lastContactDate", "nextStep", "communicationLog",
+    "companyLevel", "companyScore", "positionCategory", "positionCustom", "positionScore"
   ];
   currentEditId = null;
   if (el.form) el.form.reset();
@@ -671,6 +1020,11 @@ function resetForm() {
   }
   if (el.lastContactDate) el.lastContactDate.value = todayDateISO();
   if (el.priority) el.priority.value = "Normal";
+  if (el.companyLevel) el.companyLevel.value = "Unknown";
+  if (el.positionCategory) el.positionCategory.value = "Unknown";
+  syncCompanyScoreUI();
+  syncPositionUI();
+  setSelectedProductFocus([]);
   if (el.detailForm) el.detailForm.classList.remove("hidden");
   if (el.emptyState) el.emptyState.classList.add("hidden");
   if (el.btnSave) el.btnSave.textContent = "Save Distributor";
@@ -727,13 +1081,20 @@ function editDistributor(id) {
   if (el.company) el.company.value = d.company || "";
   if (el.country) el.country.value = d.country || "";
   if (el.city) el.city.value = d.city || "";
-  if (el.contactName) el.contactName.value = d.contactName || "";
-  if (el.role) el.role.value = d.role || "";
+  if (el.contactName) el.contactName.value = safeText(d.contactName || d.name);
+  if (el.companyLevel) el.companyLevel.value = normalizeCompanyLevel(d.companyLevel);
+  if (el.companyScore) el.companyScore.value = String(Number(d.companyScore) || scoreFromCompanyLevel(d.companyLevel));
+  if (el.positionCategory) {
+    const category = normalizePositionCategory(d.positionCategory || d.role || "Unknown");
+    el.positionCategory.value = category;
+  }
+  if (el.positionCustom) el.positionCustom.value = safeText(d.positionCustom || d.role);
+  if (el.positionScore) el.positionScore.value = String(Number(d.positionScore) || scoreFromPositionCategory(d.positionCategory));
   if (el.phone) el.phone.value = d.phone || "";
   if (el.email) el.email.value = d.email || "";
   if (el.website) el.website.value = d.website || "";
   if (el.brands) el.brands.value = d.brands || "";
-  if (el.interest) el.interest.value = d.interest || "";
+  setSelectedProductFocus(Array.isArray(d.productFocus) ? d.productFocus : safeText(d.interest));
   if (el.level) el.level.value = normalizeGrade(d.grade || d.level);
   if (el.status) el.status.value = safeText(d.stage || d.status);
   if (el.priority) el.priority.value = safeText(d.priority || "Normal");
@@ -746,6 +1107,8 @@ function editDistributor(id) {
   }
   if (el.detailForm) el.detailForm.classList.remove("hidden");
   if (el.emptyState) el.emptyState.classList.add("hidden");
+  syncCompanyScoreUI();
+  syncPositionUI();
 
   if (el.btnSave) el.btnSave.textContent = "Update Distributor";
   openDetailsPanel();
@@ -774,9 +1137,11 @@ function getFilteredData() {
     const clientSafe = ensureClientSafety(d);
     const text = [
       clientSafe.name, clientSafe.company, clientSafe.country, clientSafe.city, clientSafe.region, clientSafe.contactName, clientSafe.role,
+      clientSafe.positionCategory, clientSafe.positionCustom, clientSafe.companyLevel,
       clientSafe.phone, clientSafe.email, clientSafe.website, clientSafe.brands, clientSafe.interest, clientSafe.priority,
       clientSafe.grade, clientSafe.level, clientSafe.stage, clientSafe.status, clientSafe.notes,
       clientSafe.nextStep, clientSafe.nextAction, clientSafe.communicationLog,
+      ...(Array.isArray(clientSafe.productFocus) ? clientSafe.productFocus : []),
       ...(Array.isArray(clientSafe.history) ? clientSafe.history.map((h) => safeText(h && (h.detail || h.note || h.notes || h.description))) : [])
     ].join(" ").toLowerCase();
 
@@ -895,38 +1260,56 @@ function renderTable(data) {
   }
 
   if (el.emptyState) el.emptyState.classList.add("hidden");
-
-  data.forEach(client => {
-    const tr = document.createElement("tr");
-    tr.dataset.id = client.id;
-    const name = safeText(client.name || client.company);
-    const country = safeText(client.country);
-    const region = safeText(client.region || client.city);
-    const stage = safeText(client.stage || client.status);
-    const grade = normalizeGrade(client.grade || client.level);
-    const lastContact = safeText(client.lastContactDate || client.lastContact || client.updatedAt);
-    const dueHtml = client.isDue ? `<span class="due-flag" title="${t("status.due")}">&#9888; <span class="due-badge">${t("status.due")}</span></span>` : "";
-
-    tr.innerHTML = `
-      <td>${name || "-"} ${dueHtml}</td>
-      <td>${country || "-"}</td>
-      <td>${region || "-"}</td>
-      <td>${stage || "-"}</td>
-      <td>${grade || "-"}</td>
-      <td class="muted">${lastContact || "-"}</td>
-      <td><span class="${scoreClass(client.score)}">${client.score}</span></td>
-      <td>
-        <div class="row-actions">
-          <button class="btn ghost" data-action="wa" data-id="${client.id}">WhatsApp</button>
-          <button class="btn ghost" data-action="mail" data-id="${client.id}">Email</button>
-          <button class="btn ghost" data-action="edit" data-id="${client.id}">Edit</button>
-          <button class="btn danger" data-action="del" data-id="${client.id}">Delete</button>
-        </div>
-      </td>
-    `;
-
-    el.tableBody.appendChild(tr);
+  const grouped = new Map();
+  data.forEach((client) => {
+    const companyKey = safeText(client.company) || "Unknown Company";
+    if (!grouped.has(companyKey)) grouped.set(companyKey, []);
+    grouped.get(companyKey).push(client);
   });
+
+  let firstRendered = null;
+  grouped.forEach((clients, companyKey) => {
+    const groupTr = document.createElement("tr");
+    groupTr.className = "group-row";
+    groupTr.innerHTML = `<td colspan="9"><strong>${companyKey}</strong> (${clients.length})</td>`;
+    el.tableBody.appendChild(groupTr);
+
+    clients.forEach((client) => {
+      if (!firstRendered) firstRendered = client;
+      const tr = document.createElement("tr");
+      tr.dataset.id = client.id;
+      const company = safeText(client.company) || "Unknown Company";
+      const contact = safeText(client.contactName || client.name || "-");
+      const position = safeText(client.positionCategory || client.role || "-");
+      const country = safeText(client.country);
+      const stage = safeText(client.stage || client.status);
+      const grade = normalizeGrade(client.grade || client.level);
+      const lastContact = safeText(client.lastContactDate || client.lastContact || client.updatedAt);
+      const dueHtml = client.isDue ? `<span class="due-flag" title="${t("status.due")}">&#9888; <span class="due-badge">${t("status.due")}</span></span>` : "";
+
+      tr.innerHTML = `
+        <td>${company}</td>
+        <td>${contact} ${dueHtml}</td>
+        <td>${position}</td>
+        <td>${country || "-"}</td>
+        <td>${stage || "-"}</td>
+        <td>${grade || "-"}</td>
+        <td class="muted">${lastContact || "-"}</td>
+        <td><span class="${scoreClass(client.score)}">${client.score}</span></td>
+        <td>
+          <div class="row-actions">
+            <button class="btn ghost" data-action="wa" data-id="${client.id}">WhatsApp</button>
+            <button class="btn ghost" data-action="mail" data-id="${client.id}">Email</button>
+            <button class="btn ghost" data-action="edit" data-id="${client.id}">Edit</button>
+            <button class="btn danger" data-action="del" data-id="${client.id}">Delete</button>
+          </div>
+        </td>
+      `;
+      el.tableBody.appendChild(tr);
+    });
+  });
+
+  console.info("[ui] First rendered row object:", firstRendered);
 }
 
 function renderStats(data) {
@@ -1120,6 +1503,14 @@ function buildWeeklySummaryText(options) {
   const clients = Array.isArray(options.clients) ? options.clients : [];
   const updatesById = options.updatesById instanceof Map ? options.updatesById : new Map();
   const history = options.history || null;
+  const pickField = (row, keys) => {
+    if (!row || typeof row !== "object") return "";
+    for (const key of keys) {
+      const value = safeText(row[key]);
+      if (value) return value;
+    }
+    return "";
+  };
 
   const crmById = new Map();
   clients.forEach((c) => {
@@ -1281,9 +1672,11 @@ function importJSON(file) {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const data = JSON.parse(reader.result);
+      const parsed = JSON.parse(reader.result);
+      const importedEnvelope = migrateToEnvelope(parsed);
+      const data = importedEnvelope?.clients;
       if (!Array.isArray(data)) {
-        alert("Invalid JSON format: should be an array.");
+        alert("Invalid JSON format: expected clients[] data.");
         return;
       }
 
@@ -1297,6 +1690,12 @@ function importJSON(file) {
         city: safeText(x.city),
         contactName: safeText(x.contactName),
         role: safeText(x.role),
+        positionCategory: safeText(x.positionCategory || x.role),
+        positionCustom: safeText(x.positionCustom),
+        positionScore: Number(x.positionScore),
+        companyLevel: safeText(x.companyLevel),
+        companyScore: Number(x.companyScore),
+        productFocus: Array.isArray(x.productFocus) ? x.productFocus : safeText(x.interest).split(",").map((v) => safeText(v)).filter(Boolean),
         phone: safeText(x.phone),
         email: safeText(x.email),
         website: safeText(x.website),
@@ -1369,10 +1768,18 @@ if (el.btnSave && !el.form) {
 }
 
 if (el.btnNew) {
+  console.info("[app] New record button bound.");
   el.btnNew.addEventListener("click", (e) => {
     if (e && typeof e.preventDefault === "function") e.preventDefault();
-    resetForm();
+    try {
+      resetForm();
+    } catch (err) {
+      console.error("[app] New record click failed.", err);
+      openDetailsPanel();
+    }
   });
+} else {
+  console.warn("[app] New record button not found: #btnNew");
 }
 
 if (el.btnReset) {
@@ -1413,6 +1820,9 @@ if (el.search) el.search.addEventListener("input", render);
 if (el.filterCountry) el.filterCountry.addEventListener("change", render);
 if (el.filterLevel) el.filterLevel.addEventListener("change", render);
 if (el.filterStatus) el.filterStatus.addEventListener("change", render);
+if (el.companyLevel) el.companyLevel.addEventListener("change", syncCompanyScoreUI);
+if (el.positionCategory) el.positionCategory.addEventListener("change", syncPositionUI);
+if (el.productFocusOtherToggle) el.productFocusOtherToggle.addEventListener("change", toggleProductFocusOtherInput);
 
 if (el.btnExport) el.btnExport.addEventListener("click", exportJSON);
 if (el.btnExportWeekly) {
@@ -1567,11 +1977,25 @@ async function init() {
   const initialLang = detectInitialLanguage();
   setLanguage(initialLang, { persist: false, rerender: false });
   if (el.langSelect) el.langSelect.value = currentLang;
+  syncCompanyScoreUI();
+  syncPositionUI();
+  toggleProductFocusOtherInput();
+  console.info(`Xenta Field CRM v${SYSTEM_VERSION} loaded.
+Data protection enabled.
+Storage Key: ${STORAGE_KEY}
+Backup system active.`);
 
   const loaded = await loadInitialClients();
   const normalizedResult = normalizeClientCollection(loaded);
   distributors = normalizedResult.normalized;
-  saveDB();
+  if (normalizedResult.changed) {
+    saveDB();
+  } else if (lastLoadedStorageKey && lastLoadedStorageKey !== DB_KEY && distributors.length > 0) {
+    // Migrate legacy key data to current key without deleting original.
+    saveDB();
+    console.info(`[app] Migrated data from legacy key "${lastLoadedStorageKey}" to "${DB_KEY}".`);
+  }
+  console.info(`[app] Loaded clients: ${distributors.length} (source key: ${lastLoadedStorageKey || "none"})`);
   if (el.weekLabelInput && !safeText(el.weekLabelInput.value)) {
     el.weekLabelInput.value = getDefaultWeekLabel();
   }
@@ -1583,12 +2007,6 @@ async function init() {
   }
 }
 
-init();
-  const pickField = (row, keys) => {
-    if (!row || typeof row !== "object") return "";
-    for (const key of keys) {
-      const value = safeText(row[key]);
-      if (value) return value;
-    }
-    return "";
-  };
+init().catch((err) => {
+  console.error("[app] Init failed.", err);
+});

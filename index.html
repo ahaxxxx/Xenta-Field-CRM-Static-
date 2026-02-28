@@ -176,9 +176,10 @@
         <table class="table" id="leadTable">
           <thead>
             <tr>
-              <th data-sort="name" data-i18n="table.name">Name</th>
+              <th data-sort="company">Company</th>
+              <th data-sort="name">Contact</th>
+              <th data-sort="positionCategory">Position</th>
               <th data-sort="country" data-i18n="table.country">Country</th>
-              <th data-sort="region" data-i18n="table.region">Region</th>
               <th data-sort="stage" data-i18n="table.stage">Stage</th>
               <th data-sort="grade" data-i18n="table.grade">Grade</th>
               <th data-sort="lastContactDate" data-i18n="table.last">Last</th>
@@ -205,8 +206,56 @@
 
       <div id="detailForm" class="hidden">
         <div class="field">
-          <label data-i18n="details.name">Name</label>
-          <input id="fName" class="input" />
+          <label>Company Name / 公司名称</label>
+          <input id="fCompany" class="input" />
+        </div>
+
+        <div class="grid2">
+          <div class="field">
+            <label>Company Level / 公司级别</label>
+            <select id="fCompanyLevel" class="select">
+              <option value="Unknown">Unknown</option>
+              <option value="Tier1">Tier 1</option>
+              <option value="Tier2">Tier 2</option>
+              <option value="Tier3">Tier 3</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Company Score / 公司分</label>
+            <input id="fCompanyScore" class="input" type="number" readonly />
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div class="field">
+            <label>Contact Name / 联系人</label>
+            <input id="fContactName" class="input" />
+          </div>
+          <div class="field">
+            <label>Position Category / 职位类别</label>
+            <select id="fPositionCategory" class="select">
+              <option value="Unknown">Unknown</option>
+              <option value="Owner">Owner</option>
+              <option value="CEO">CEO</option>
+              <option value="Director">Director</option>
+              <option value="Manager">Manager</option>
+              <option value="Sales">Sales</option>
+              <option value="Procurement">Procurement</option>
+              <option value="Technical">Technical</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div id="positionCustomWrap" class="field hidden">
+            <label>Custom Position / 自定义职位</label>
+            <input id="fPositionCustom" class="input" placeholder="e.g., Head of Lab" />
+          </div>
+          <div class="field">
+            <label>Position Score / 职位分</label>
+            <input id="fPositionScore" class="input" type="number" min="0" max="10" />
+          </div>
         </div>
 
         <div class="grid2">
@@ -263,12 +312,15 @@
 
         <div class="field">
           <label data-i18n="details.focus">Product Focus</label>
-          <select id="fFocus" class="select">
-            <option value="CLIA POCT">CLIA POCT</option>
-            <option value="FIA">FIA</option>
-            <option value="LFA">LFA</option>
-            <option value="PCR">PCR</option>
-          </select>
+          <div id="fProductFocusGroup">
+            <label><input type="checkbox" name="fProductFocus" value="CLIA POCT" /> CLIA POCT</label>
+            <label><input type="checkbox" name="fProductFocus" value="FIA" /> FIA</label>
+            <label><input type="checkbox" name="fProductFocus" value="LFA" /> LFA</label>
+            <label><input type="checkbox" name="fProductFocus" value="PCR" /> PCR</label>
+            <label><input type="checkbox" name="fProductFocus" value="Rapid test" /> Rapid test</label>
+            <label><input id="fProductFocusOtherToggle" type="checkbox" name="fProductFocus" value="Other" /> Other</label>
+          </div>
+          <input id="fProductFocusOtherText" class="input hidden" placeholder="Other focus / 其他产品需求" />
         </div>
 
         <div class="field">
