@@ -1,13 +1,24 @@
 (function () {
   const REPORT_COLUMNS = [
+    "\u516c\u53f8\u540d\u79f0",
     "\u56fd\u5bb6",
-    "\u5ba2\u6237\u540d\u79f0",
-    "\u9636\u6bb5",
-    "\u672c\u5468\u8fdb\u5c55",
-    "\u95ee\u9898\u4e0e\u98ce\u9669",
-    "\u4e0b\u4e00\u6b65\u52a8\u4f5c",
-    "\u8ddf\u8fdb\u8bc4\u5206",
-    "\u662f\u5426\u5230\u671f",
+    "\u57ce\u5e02",
+    "\u516c\u53f8\u7b49\u7ea7",
+    "\u8054\u7cfb\u4eba\u59d3\u540d",
+    "\u804c\u4f4d",
+    "\u7535\u8bdd",
+    "\u90ae\u7bb1",
+    "WhatsApp",
+    "LinkedIn",
+    "\u4ea7\u54c1\u65b9\u5411",
+    "\u81ea\u5b9a\u4e49\u4ea7\u54c1\u65b9\u5411",
+    "\u7ade\u4e89\u54c1\u724c",
+    "\u5f53\u524d\u9636\u6bb5",
+    "\u4f18\u5148\u7ea7",
+    "\u6700\u540e\u8054\u7cfb\u65e5\u671f",
+    "\u4e0b\u6b21\u8ddf\u8fdb\u65e5\u671f",
+    "\u603b\u8bc4\u5206",
+    "\u6c9f\u901a\u5386\u53f2",
   ];
   const TIMELINE_COLUMNS = [
     "\u5ba2\u6237ID",
@@ -39,6 +50,15 @@
   function sanitizeFilenameToken(value) {
     const cleaned = safeText(value).replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_");
     return cleaned || "Week";
+  }
+
+  function getDateToken() {
+    const today = new Date();
+    return (
+      today.getFullYear().toString() +
+      String(today.getMonth() + 1).padStart(2, "0") +
+      String(today.getDate()).padStart(2, "0")
+    );
   }
 
   function getClientId(client) {
@@ -94,21 +114,40 @@
 
   function normalizeReportClient(client, updatesById) {
     const c = client || {};
-    const id = safeText(c.id || c.clientId);
-    const progressFromMap = updatesById instanceof Map ? safeText(updatesById.get(id)) : "";
-    const currentProgress = progressFromMap || safeText(
-      c.currentProgress || c.latestProgress || c.progress || c.weeklyNotes || c.notes
-    );
+    const history = sortedHistoryForClient(c);
+    const historyText = history.map((h) => {
+      const d = toISODate(h.dateRaw);
+      const t = safeText(h.type) || "Note";
+      const detail = safeText(h.detail);
+      return detail ? `[${d}][${t}] ${detail}` : "";
+    }).filter(Boolean).join("\n");
+    const focusList = Array.isArray(c.productFocus)
+      ? c.productFocus.map((v) => safeText(v)).filter(Boolean)
+      : safeText(c.interest).split(",").map((v) => safeText(v)).filter(Boolean);
+    const knownFocus = new Set(["CLIA POCT", "FIA", "LFA", "PCR", "Rapid test"]);
+    const customFocus = focusList.filter((v) => !knownFocus.has(v));
+    const position = safeText(c.positionCustom || c.positionCategory || c.role);
 
     return {
+      companyName: safeText(c.company),
       country: safeText(c.country) || "Unknown",
-      clientName: safeText(c.contactName || c.name || c.clientName || c.company),
+      city: safeText(c.city || c.region),
+      companyLevel: safeText(c.companyLevel),
+      contactName: safeText(c.contactName || c.name || c.clientName),
+      position,
+      phone: safeText(c.phone),
+      email: safeText(c.email),
+      whatsapp: safeText(c.phone),
+      linkedIn: safeText(c.website),
+      productFocus: focusList.filter((v) => knownFocus.has(v)).join(", "),
+      productFocusCustom: customFocus.join(", "),
+      brands: safeText(c.brands),
       stage: safeText(c.stage || c.status),
-      currentProgress,
-      problems: safeText(c.problems || c.problem || c.blockers || c.risks),
-      nextAction: safeText(c.nextAction || c.next_step || c.plan || c.nextStep),
-      followUpScore: safeText(c.followUpScore || c.score),
-      isDue: c.isDue ? "\u662f" : "\u5426",
+      priority: safeText(c.priority || c.level),
+      lastContactDate: toISODate(c.lastContactDate || c.lastContact || c.updatedAt),
+      nextFollowUpDate: safeText(c.nextFollowUpDate || c.next_contact_date || c.nextStepDate),
+      totalScore: safeText(c.followUpScore || c.score),
+      communicationHistory: historyText || safeText(c.communicationLog),
     };
   }
 
@@ -153,41 +192,42 @@
   function buildGroupedReportRows(sourceClients, updatesById) {
     const normalized = sourceClients
       .map((client) => normalizeReportClient(client, updatesById))
-      .filter((c) => c.clientName);
+      .filter((c) => c.companyName || c.contactName);
 
     normalized.sort((a, b) => {
       const byCountry = a.country.localeCompare(b.country);
       if (byCountry !== 0) return byCountry;
-      return a.clientName.localeCompare(b.clientName);
+      const byCompany = safeText(a.companyName).localeCompare(safeText(b.companyName));
+      if (byCompany !== 0) return byCompany;
+      return safeText(a.contactName).localeCompare(safeText(b.contactName));
     });
 
     const rows = [REPORT_COLUMNS];
-    const merges = [];
-    const countryHeaderRows = [];
-
-    let currentCountry = "";
     normalized.forEach((c) => {
-      if (c.country !== currentCountry) {
-        currentCountry = c.country;
-        const headerRowIndex = rows.length;
-        rows.push([currentCountry, "", "", "", "", "", "", ""]);
-        merges.push({ s: { r: headerRowIndex, c: 0 }, e: { r: headerRowIndex, c: 7 } });
-        countryHeaderRows.push(headerRowIndex);
-      }
-
       rows.push([
+        c.companyName,
         c.country,
-        c.clientName,
+        c.city,
+        c.companyLevel,
+        c.contactName,
+        c.position,
+        c.phone,
+        c.email,
+        c.whatsapp,
+        c.linkedIn,
+        c.productFocus,
+        c.productFocusCustom,
+        c.brands,
         c.stage,
-        c.currentProgress,
-        c.problems,
-        c.nextAction,
-        c.followUpScore,
-        c.isDue,
+        c.priority,
+        c.lastContactDate,
+        c.nextFollowUpDate,
+        c.totalScore,
+        c.communicationHistory,
       ]);
     });
 
-    return { rows, merges, countryHeaderRows };
+    return { rows, merges: [], countryHeaderRows: [] };
   }
 
   function buildTimelineRows(sourceClients) {
@@ -292,7 +332,8 @@
     wsWeekly["!merges"] = grouped.merges;
     wsWeekly["!cols"] = autoColumnWidths(grouped.rows);
     wsWeekly["!freeze"] = { xSplit: 0, ySplit: 1, topLeftCell: "A2", activePane: "bottomLeft", state: "frozen" };
-    wsWeekly["!autofilter"] = { ref: "A1:H1" };
+    const weeklyLastCol = window.XLSX.utils.encode_col(REPORT_COLUMNS.length - 1);
+    wsWeekly["!autofilter"] = { ref: `A1:${weeklyLastCol}1` };
     applyHeaderStyle(wsWeekly);
     applyCountryHeaderStyle(wsWeekly, grouped.countryHeaderRows);
 
@@ -312,7 +353,18 @@
     window.XLSX.utils.book_append_sheet(wb, wsWeekly, "\u5468\u8fdb\u5c55\u62a5\u544a");
     window.XLSX.utils.book_append_sheet(wb, wsTimeline, "\u5b8c\u6574\u6c9f\u901a\u65f6\u95f4\u7ebf");
     window.XLSX.utils.book_append_sheet(wb, wsLifecycle, "\u5ba2\u6237\u751f\u547d\u5468\u671f\u6458\u8981");
-    window.XLSX.writeFile(wb, `Weekly_Client_Progress_${sanitizeFilenameToken(weekLabel)}.xlsx`);
+    const excelBuffer = window.XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([excelBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const fileName = `Xenta_Weekly_Report_${getDateToken()}.xlsx`;
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
 
     return {
       totalClients: Math.max(grouped.rows.length - grouped.countryHeaderRows.length - 1, 0),

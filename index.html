@@ -397,6 +397,20 @@
   </main>
 
   <div id="detailsBackdrop" class="details-backdrop hidden"></div>
+  <div id="emailModalBackdrop" class="email-modal-backdrop hidden"></div>
+  <div id="emailModal" class="email-modal hidden" role="dialog" aria-modal="true" aria-labelledby="emailModalTitle">
+    <div class="panel-row">
+      <div id="emailModalTitle" class="panel-title">Email</div>
+      <button id="btnCloseEmailModal" class="btn ghost" type="button">Close</button>
+    </div>
+    <div class="field">
+      <label>Email Address</label>
+      <input id="emailModalValue" class="input" readonly />
+    </div>
+    <div class="panel-row">
+      <button id="btnCopyEmail" class="btn primary" type="button">Copy</button>
+    </div>
+  </div>
 
   <footer class="footer">
     <div>漏 <span id="year"></span> Xenta Field CRM (Static)</div>

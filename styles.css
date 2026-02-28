@@ -136,6 +136,27 @@ body{
   z-index: 35;
 }
 
+.email-modal-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(4,8,20,.42);
+  z-index: 60;
+}
+
+.email-modal{
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 24px));
+  z-index: 61;
+  background: linear-gradient(180deg, rgba(17,24,49,.98), rgba(12,18,38,.98));
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 14px;
+  box-shadow: 0 20px 48px rgba(0,0,0,.48);
+  padding: 14px;
+}
+
 body .topbar,
 body .layout,
 body .footer{

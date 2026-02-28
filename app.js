@@ -880,6 +880,11 @@ const el = {
 
   messagePreview: pickEl("#messagePreview", "#mOutput"),
   previewTitle: pickEl("#previewTitle"),
+  emailModal: pickEl("#emailModal"),
+  emailModalBackdrop: pickEl("#emailModalBackdrop"),
+  btnCloseEmailModal: pickEl("#btnCloseEmailModal"),
+  btnCopyEmail: pickEl("#btnCopyEmail"),
+  emailModalValue: pickEl("#emailModalValue"),
 };
 
 function openDetailsPanel() {
@@ -902,6 +907,37 @@ function closeDetailsPanel() {
     el.detailsBackdrop.classList.add("hidden");
   }
   document.body.classList.remove("details-open");
+}
+
+function openEmailModal(email) {
+  const value = safeText(email);
+  if (!value) {
+    alert("No email available.");
+    return;
+  }
+  if (el.emailModalValue) el.emailModalValue.value = value;
+  if (el.emailModal) el.emailModal.classList.remove("hidden");
+  if (el.emailModalBackdrop) el.emailModalBackdrop.classList.remove("hidden");
+}
+
+function closeEmailModal() {
+  if (el.emailModal) el.emailModal.classList.add("hidden");
+  if (el.emailModalBackdrop) el.emailModalBackdrop.classList.add("hidden");
+}
+
+async function copyEmailFromModal() {
+  const email = safeText(el.emailModalValue ? el.emailModalValue.value : "");
+  if (!email) return;
+  try {
+    await navigator.clipboard.writeText(email);
+    alert("Email copied.");
+  } catch (_) {
+    if (el.emailModalValue) {
+      el.emailModalValue.select();
+      document.execCommand("copy");
+      alert("Email copied.");
+    }
+  }
 }
 
 function getSelectedProductFocus() {
@@ -1332,15 +1368,34 @@ function render() {
 // Import / Export
 // ---------------------------
 async function getExportClients() {
+  const fromStorage = loadDB();
+  const memory = Array.isArray(distributors) ? distributors : [];
+  const mergedById = new Map();
+  const merged = [];
+  const pushUnique = (item) => {
+    if (!item || typeof item !== "object") return;
+    const id = safeText(item.id);
+    if (id && mergedById.has(id)) return;
+    if (id) mergedById.set(id, true);
+    merged.push(item);
+  };
+
+  fromStorage.forEach(pushUnique);
+  memory.forEach(pushUnique);
+
   if (window.dataAdapter && typeof window.dataAdapter.getAllClients === "function") {
     try {
       const clients = await window.dataAdapter.getAllClients();
-      if (Array.isArray(clients)) return clients;
+      if (Array.isArray(clients) && clients.length > 0) {
+        clients.forEach(pushUnique);
+      }
     } catch (err) {
       console.warn("[app] Failed to load clients from dataAdapter; using in-memory records.", err);
     }
   }
-  return distributors;
+
+  console.info(`[export] Clients prepared from STORAGE_KEY "${STORAGE_KEY}": ${merged.length}`);
+  return merged;
 }
 
 function getProgressUpdatesByClient(clients, options = {}) {
@@ -1417,6 +1472,30 @@ function parseManualMapping(raw) {
 function sanitizeFilenameToken(value) {
   const cleaned = safeText(value).replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_");
   return cleaned || "Week";
+}
+
+function getDateToken() {
+  return new Date().toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+async function saveJsonWithBrowserPicker(filename, payloadText) {
+  if (window.showSaveFilePicker) {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: filename,
+      types: [{ description: "JSON file", accept: { "application/json": [".json"] } }],
+    });
+    const writable = await handle.createWritable();
+    await writable.write(payloadText);
+    await writable.close();
+    return;
+  }
+  const blob = new Blob([payloadText], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function toggleWeeklyPanel(visible) {
@@ -1653,15 +1732,8 @@ async function exportWeeklyProgressExcel(options = {}) {
 async function exportJSON() {
   try {
     const clients = await getExportClients();
-    const blob = new Blob([JSON.stringify(clients, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `xenta_distributors_${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-
-    URL.revokeObjectURL(url);
+    const filename = `Xenta_CRM_Backup_${getDateToken()}.json`;
+    await saveJsonWithBrowserPicker(filename, JSON.stringify(clients, null, 2));
   } catch (err) {
     console.warn("[app] JSON export failed.", err);
     alert("JSON export failed.");
@@ -1717,8 +1789,28 @@ function importJSON(file) {
         updatedAt: x.updatedAt || nowISO(),
       }));
 
-      distributors = cleaned;
+      const existingById = new Map();
+      distributors.forEach((d, idx) => {
+        const id = safeText(d && d.id);
+        if (!id) return;
+        existingById.set(id, idx);
+      });
+      cleaned.forEach((item) => {
+        const id = safeText(item && item.id);
+        if (!id) return;
+        if (existingById.has(id)) {
+          distributors[existingById.get(id)] = ensureClientSafety({
+            ...distributors[existingById.get(id)],
+            ...item,
+            updatedAt: nowISO(),
+          });
+        } else {
+          distributors.push(item);
+          existingById.set(id, distributors.length - 1);
+        }
+      });
       saveDB();
+      console.info(`[import] Merge complete. Total clients: ${distributors.length}`);
       render();
       alert("Import successful.");
     } catch (e) {
@@ -1799,9 +1891,23 @@ if (el.detailsBackdrop) {
     closeDetailsPanel();
   });
 }
+if (el.emailModalBackdrop) {
+  el.emailModalBackdrop.addEventListener("click", () => closeEmailModal());
+}
+if (el.btnCloseEmailModal) {
+  el.btnCloseEmailModal.addEventListener("click", () => closeEmailModal());
+}
+if (el.btnCopyEmail) {
+  el.btnCopyEmail.addEventListener("click", () => {
+    copyEmailFromModal();
+  });
+}
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeDetailsPanel();
+  if (e.key === "Escape") {
+    closeDetailsPanel();
+    closeEmailModal();
+  }
 });
 
 if (el.langSelect) {
@@ -1932,12 +2038,7 @@ if (el.tableBody) {
     }
 
     if (action === "mail") {
-      if (!d.email) {
-        alert("No email available.");
-        return;
-      }
-      const email = generateEmail(d);
-      openMail(d.email, email.subject, email.body);
+      openEmailModal(d.email);
     }
   });
 }
