@@ -69,6 +69,9 @@ const positionCategoryScoreMap = {
   Other: 3,
 };
 
+const PROGRESS_UPDATE_COOLDOWN_DAYS = 3;
+const PROGRESS_UPDATE_SCORE_PENALTY = 10;
+
 const i18n = {
   en: {
     "app.title": "Xenta Field CRM",
@@ -330,6 +333,8 @@ function ensureClientSafety(rawClient) {
   }
   client.interest = safeText(client.interest || client.productFocus.join(", "));
   client.history = Array.isArray(client.history) ? client.history : [];
+  client.latestProgress = safeText(client.latestProgress || client.progressSummary);
+  client.progressUpdatedAt = safeText(client.progressUpdatedAt || client.lastProgressUpdateAt);
   client.priority = safePriority;
   client.grade = safeGrade;
   client.stage = safeStage;
@@ -347,6 +352,15 @@ function getDaysSinceLastContact(rawClient) {
   return Math.max(0, days);
 }
 
+function isRecentTimestamp(rawIso, days) {
+  const iso = safeText(rawIso);
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return false;
+  const deltaMs = Date.now() - d.getTime();
+  return deltaMs >= 0 && deltaMs <= days * 24 * 60 * 60 * 1000;
+}
+
 function isFollowUpDue(rawClient) {
   const client = ensureClientSafety(rawClient);
   const cadenceDays = followUpDays[client.grade] || followUpDays.C;
@@ -361,9 +375,12 @@ function calculateFollowUpScore(rawClient) {
   const priorityBonus = safeText(client.priority).toLowerCase() === "high" ? 5 : 0;
   const companyBonus = Number(client.companyScore) || 0;
   const positionBonus = Number(client.positionScore) || 0;
+  const recentProgressPenalty = isRecentTimestamp(client.progressUpdatedAt, PROGRESS_UPDATE_COOLDOWN_DAYS)
+    ? PROGRESS_UPDATE_SCORE_PENALTY
+    : 0;
 
-  const score = (daysSinceLastContact * gradeWeight) + stageWeight + priorityBonus + companyBonus + positionBonus;
-  return Math.round(score);
+  const score = (daysSinceLastContact * gradeWeight) + stageWeight + priorityBonus + companyBonus + positionBonus - recentProgressPenalty;
+  return Math.max(0, Math.round(score));
 }
 
 function enrichClient(rawClient) {
@@ -452,6 +469,19 @@ function historyToCommunicationLog(history) {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function buildLatestProgressSummary(rawLog) {
+  const items = parseCommunicationLog(rawLog);
+  if (!items.length) return "";
+  const last = items[items.length - 1] || {};
+  const date = safeText(last.date);
+  const type = safeText(last.type);
+  const detail = safeText(last.detail);
+  if (!detail) return "";
+  if (date && type) return `[${date}][${type}] ${detail}`;
+  if (date) return `[${date}] ${detail}`;
+  return detail;
 }
 
 function xmlEscape(value) {
@@ -841,6 +871,7 @@ const el = {
   priority: pickEl("#priority", "#fPriority"),
   lastContactDate: pickEl("#lastContactDate", "#fLastContact"),
   nextStep: pickEl("#fNextStep"),
+  latestProgress: pickEl("#fLatestProgress"),
 
   btnSave: pickEl("#btnSave"),
   btnReset: pickEl("#btnReset"),
@@ -1001,6 +1032,7 @@ function getFormData() {
   const lastContactDateValue = safeText(el.lastContactDate ? el.lastContactDate.value : "") || todayDateISO();
   const priorityValue = safeText(el.priority ? el.priority.value : "") || "Normal";
   const communicationLogValue = safeText(el.communicationLog ? el.communicationLog.value : "");
+  const latestProgressValue = buildLatestProgressSummary(communicationLogValue) || safeText(el.latestProgress ? el.latestProgress.value : "");
   const companyLevel = normalizeCompanyLevel(el.companyLevel ? el.companyLevel.value : "Unknown");
   const positionCategory = normalizePositionCategory(el.positionCategory ? el.positionCategory.value : "Unknown");
   const positionCustom = safeText(el.positionCustom ? el.positionCustom.value : "");
@@ -1037,6 +1069,8 @@ function getFormData() {
     nextStep: safeText(el.nextStep ? el.nextStep.value : ""),
     nextAction: safeText(el.nextStep ? el.nextStep.value : ""),
     communicationLog: communicationLogValue,
+    latestProgress: latestProgressValue,
+    progressUpdatedAt: communicationLogValue ? nowISO() : "",
     history: communicationLogValue ? parseCommunicationLog(communicationLogValue) : null,
   };
 }
@@ -1045,7 +1079,7 @@ function resetForm() {
   const fields = [
     "company", "country", "city", "contactName", "role", "phone",
     "email", "website", "brands", "interest", "level", "status", "notes", "priority", "lastContactDate", "nextStep", "communicationLog",
-    "companyLevel", "companyScore", "positionCategory", "positionCustom", "positionScore"
+    "latestProgress", "companyLevel", "companyScore", "positionCategory", "positionCustom", "positionScore"
   ];
   currentEditId = null;
   if (el.form) el.form.reset();
@@ -1094,13 +1128,29 @@ function updateDistributor(id, d) {
   const history = Array.isArray(d.history)
     ? d.history
     : (Array.isArray(existing.history) ? existing.history : []);
+  const oldLog = safeText(existing.communicationLog);
+  const newLog = safeText(d.communicationLog);
+  const communicationLogChanged = !!newLog && newLog !== oldLog;
 
-  distributors[idx] = ensureClientSafety({
+  const nextRecord = {
     ...existing,
     ...d,
     history,
     updatedAt: nowISO(),
-  });
+  };
+  if (!safeText(nextRecord.latestProgress)) {
+    nextRecord.latestProgress = buildLatestProgressSummary(newLog);
+  }
+  if (communicationLogChanged) {
+    const contactDate = todayDateISO();
+    nextRecord.lastContactDate = contactDate;
+    nextRecord.lastContact = contactDate;
+    nextRecord.progressUpdatedAt = nowISO();
+  } else {
+    nextRecord.progressUpdatedAt = safeText(existing.progressUpdatedAt);
+  }
+
+  distributors[idx] = ensureClientSafety(nextRecord);
   saveDB();
 }
 
@@ -1140,6 +1190,10 @@ function editDistributor(id) {
   if (el.communicationLog) {
     const savedLog = safeText(d.communicationLog);
     el.communicationLog.value = savedLog || historyToCommunicationLog(d.history);
+  }
+  if (el.latestProgress) {
+    const summary = safeText(d.latestProgress) || buildLatestProgressSummary(el.communicationLog ? el.communicationLog.value : "");
+    el.latestProgress.value = summary;
   }
   if (el.detailForm) el.detailForm.classList.remove("hidden");
   if (el.emptyState) el.emptyState.classList.add("hidden");
@@ -1432,6 +1486,7 @@ function getProgressUpdatesByClient(clients, options = {}) {
     } else {
       progressText = pickField(d, [
         "latestProgress",
+        "progressSummary",
         "latest_progress",
         "progress",
         "currentProgress",
@@ -1784,6 +1839,8 @@ function importJSON(file) {
         nextStep: safeText(x.nextStep || x.nextAction || x.next_step || x.plan),
         nextAction: safeText(x.nextAction || x.nextStep || x.next_step || x.plan),
         communicationLog: safeText(x.communicationLog),
+        latestProgress: safeText(x.latestProgress || x.progressSummary),
+        progressUpdatedAt: safeText(x.progressUpdatedAt || x.lastProgressUpdateAt),
         history: Array.isArray(x.history) ? x.history : parseCommunicationLog(x.communicationLog),
         createdAt: x.createdAt || nowISO(),
         updatedAt: x.updatedAt || nowISO(),
@@ -1929,6 +1986,11 @@ if (el.filterStatus) el.filterStatus.addEventListener("change", render);
 if (el.companyLevel) el.companyLevel.addEventListener("change", syncCompanyScoreUI);
 if (el.positionCategory) el.positionCategory.addEventListener("change", syncPositionUI);
 if (el.productFocusOtherToggle) el.productFocusOtherToggle.addEventListener("change", toggleProductFocusOtherInput);
+if (el.communicationLog && el.latestProgress) {
+  el.communicationLog.addEventListener("input", () => {
+    el.latestProgress.value = buildLatestProgressSummary(el.communicationLog.value);
+  });
+}
 
 if (el.btnExport) el.btnExport.addEventListener("click", exportJSON);
 if (el.btnExportWeekly) {
