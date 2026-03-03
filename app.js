@@ -319,6 +319,8 @@ function ensureClientSafety(rawClient) {
   client.company = safeText(client.company);
   client.name = safeText(client.name || client.contactName || client.company);
   client.contactName = safeText(client.contactName || client.name);
+  client.region = safeText(client.region || client.city);
+  client.city = safeText(client.city || client.region);
   client.companyLevel = normalizeCompanyLevel(client.companyLevel);
   client.companyScore = Number(client.companyScore);
   if (!Number.isFinite(client.companyScore)) client.companyScore = scoreFromCompanyLevel(client.companyLevel);
@@ -849,6 +851,7 @@ const el = {
   company: pickEl("#company", "#fCompany", "#fName"),
   country: pickEl("#country", "#fCountry"),
   city: pickEl("#city"),
+  region: pickEl("#region", "#fRegion"),
   contactName: pickEl("#contactName", "#fContactName"),
   role: pickEl("#role", "#fPositionCustom"),
   companyLevel: pickEl("#fCompanyLevel"),
@@ -881,8 +884,10 @@ const el = {
 
   search: pickEl("#search", "#qSearch"),
   filterCountry: pickEl("#filterCountry", "#qCountry"),
+  filterRegion: pickEl("#filterRegion", "#qRegion"),
   filterLevel: pickEl("#filterLevel", "#qGrade"),
   filterStatus: pickEl("#filterStatus", "#qStage"),
+  filterFocus: pickEl("#filterFocus", "#qFocus"),
 
   tableBody: pickEl("#tableBody", "#leadTbody"),
   emptyState: pickEl("#emptyState"),
@@ -1039,12 +1044,14 @@ function getFormData() {
   const positionScoreRaw = Number(el.positionScore ? el.positionScore.value : NaN);
   const positionScore = Number.isFinite(positionScoreRaw) ? positionScoreRaw : scoreFromPositionCategory(positionCategory);
   const productFocus = getSelectedProductFocus();
+  const regionValue = safeText(el.region ? el.region.value : "");
 
   return {
     company: companyValue,
     name: contactValue || companyValue,
     country: safeText(el.country ? el.country.value : ""),
-    city: safeText(el.city ? el.city.value : ""),
+    city: regionValue,
+    region: regionValue,
     contactName: contactValue,
     role: positionCustom || positionCategory,
     positionCategory,
@@ -1077,7 +1084,7 @@ function getFormData() {
 
 function resetForm() {
   const fields = [
-    "company", "country", "city", "contactName", "role", "phone",
+    "company", "country", "city", "region", "contactName", "role", "phone",
     "email", "website", "brands", "interest", "level", "status", "notes", "priority", "lastContactDate", "nextStep", "communicationLog",
     "latestProgress", "companyLevel", "companyScore", "positionCategory", "positionCustom", "positionScore"
   ];
@@ -1121,10 +1128,8 @@ function createDistributor(d) {
 }
 
 function updateDistributor(id, d) {
-  const idx = distributors.findIndex(x => x.id === id);
-  if (idx === -1) return;
-
-  const existing = distributors[idx] || {};
+  const existing = distributors.find((x) => x.id === id);
+  if (!existing) return;
   const history = Array.isArray(d.history)
     ? d.history
     : (Array.isArray(existing.history) ? existing.history : []);
@@ -1150,7 +1155,13 @@ function updateDistributor(id, d) {
     nextRecord.progressUpdatedAt = safeText(existing.progressUpdatedAt);
   }
 
-  distributors[idx] = ensureClientSafety(nextRecord);
+  distributors = distributors.map((client) => {
+    if (client.id !== id) return client;
+    return ensureClientSafety({
+      ...client,
+      ...nextRecord,
+    });
+  });
   saveDB();
 }
 
@@ -1166,7 +1177,8 @@ function editDistributor(id) {
   currentEditId = id;
   if (el.company) el.company.value = d.company || "";
   if (el.country) el.country.value = d.country || "";
-  if (el.city) el.city.value = d.city || "";
+  if (el.region) el.region.value = safeText(d.region || d.city);
+  if (el.city) el.city.value = d.city || safeText(d.region || "");
   if (el.contactName) el.contactName.value = safeText(d.contactName || d.name);
   if (el.companyLevel) el.companyLevel.value = normalizeCompanyLevel(d.companyLevel);
   if (el.companyScore) el.companyScore.value = String(Number(d.companyScore) || scoreFromCompanyLevel(d.companyLevel));
@@ -1210,18 +1222,24 @@ function editDistributor(id) {
 function getFilteredData() {
   const searchEl = el.search || document.getElementById("search");
   const filterCountryEl = el.filterCountry || document.getElementById("filterCountry");
+  const filterRegionEl = el.filterRegion || document.getElementById("filterRegion") || document.getElementById("qRegion");
   const filterLevelEl = el.filterLevel || document.getElementById("filterLevel");
   const filterStatusEl = el.filterStatus || document.getElementById("filterStatus");
+  const filterFocusEl = el.filterFocus || document.getElementById("filterFocus") || document.getElementById("qFocus");
 
   const searchValue = searchEl ? searchEl.value : "";
   const filterCountryValue = filterCountryEl ? filterCountryEl.value : "";
+  const filterRegionValue = filterRegionEl ? filterRegionEl.value : "";
   const filterLevelValue = filterLevelEl ? filterLevelEl.value : "";
   const filterStatusValue = filterStatusEl ? filterStatusEl.value : "";
+  const filterFocusValue = filterFocusEl ? filterFocusEl.value : "";
 
   const q = safeText(searchValue).toLowerCase();
   const countryFilter = safeText(filterCountryValue).toLowerCase();
+  const regionFilter = safeText(filterRegionValue).toLowerCase();
   const lvl = safeText(filterLevelValue);
   const st = safeText(filterStatusValue).toLowerCase();
+  const focus = safeText(filterFocusValue);
 
   return distributors.filter(d => {
     const clientSafe = ensureClientSafety(d);
@@ -1237,10 +1255,12 @@ function getFilteredData() {
 
     const matchQ = !q || text.includes(q);
     const matchCountry = !countryFilter || safeText(clientSafe.country).toLowerCase() === countryFilter;
+    const matchRegion = !regionFilter || safeText(clientSafe.region || clientSafe.city).toLowerCase() === regionFilter;
     const matchLevel = !lvl || normalizeGrade(clientSafe.grade || clientSafe.level) === normalizeGrade(lvl);
     const matchStatus = !st || safeText(clientSafe.stage || clientSafe.status).toLowerCase() === st;
+    const matchFocus = !focus || (Array.isArray(clientSafe.productFocus) && clientSafe.productFocus.includes(focus));
 
-    return matchQ && matchCountry && matchLevel && matchStatus;
+    return matchQ && matchCountry && matchRegion && matchLevel && matchStatus && matchFocus;
   });
 }
 
@@ -1981,8 +2001,10 @@ if (el.btnSortMode) {
 
 if (el.search) el.search.addEventListener("input", render);
 if (el.filterCountry) el.filterCountry.addEventListener("change", render);
+if (el.filterRegion) el.filterRegion.addEventListener("change", render);
 if (el.filterLevel) el.filterLevel.addEventListener("change", render);
 if (el.filterStatus) el.filterStatus.addEventListener("change", render);
+if (el.filterFocus) el.filterFocus.addEventListener("change", render);
 if (el.companyLevel) el.companyLevel.addEventListener("change", syncCompanyScoreUI);
 if (el.positionCategory) el.positionCategory.addEventListener("change", syncPositionUI);
 if (el.productFocusOtherToggle) el.productFocusOtherToggle.addEventListener("change", toggleProductFocusOtherInput);
